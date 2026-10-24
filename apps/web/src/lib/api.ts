@@ -94,11 +94,12 @@ export const api = {
   me: () => call<Me>("/api/me"),
   createWorkspace: (blank = false) => post<ServerWorkspace>("/api/workspaces", blank ? { blank: true } : undefined),
   agent: (id: string, message: string) =>
-    post<{ turn: AgentTurn; analyze?: string; connectGoogle?: boolean; upgrade?: boolean; workspace: ServerWorkspace }>(`/api/workspaces/${id}/agent`, { message }),
+    post<{ turn: AgentTurn; analyze?: string; connectGoogle?: boolean; upgrade?: boolean; simulate?: boolean; workspace: ServerWorkspace }>(`/api/workspaces/${id}/agent`, { message }),
   workspace: (id: string, since?: string) =>
     call<ServerWorkspace | { changed: false; updatedAt: string }>(`/api/workspaces/${id}${since ? `?since=${encodeURIComponent(since)}` : ""}`),
   claim: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/claim`),
-  analyze: (id: string, request: string) => post<ImpactReport>(`/api/workspaces/${id}/analyze`, { request }),
+  analyze: (id: string, request: string, simulate = false) => post<ImpactReport>(`/api/workspaces/${id}/analyze`, { request, ...(simulate ? { simulate: true } : {}) }),
+  addVendor: (id: string, taskId: string, name: string) => post<{ link: string; workspace: ServerWorkspace }>(`/api/workspaces/${id}/tasks/${taskId}/vendor`, { name }),
   report: (id: string, reportId: string) => call<ImpactReport>(`/api/workspaces/${id}/reports/${reportId}`),
   voiceUrl: (id: string, reportId: string) => `${API_URL}/api/workspaces/${id}/reports/${reportId}/voice`,
   approve: (id: string, reportId: string, changeIds: string[]) => post<ServerWorkspace>(`/api/workspaces/${id}/approve`, { reportId, changeIds }),

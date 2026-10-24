@@ -229,6 +229,14 @@ export function findLink(channel: "telegram" | "whatsapp", address: string) {
   return null;
 }
 
+export function findVendor(token: string) {
+  for (const w of workspaces.values()) {
+    const task = w.project.tasks.find((t) => t.vendor?.token === token);
+    if (task) return { workspace: w, task };
+  }
+  return null;
+}
+
 export function findPayment(orderId: string) {
   for (const w of workspaces.values()) {
     const p = w.payments.find((x) => x.orderId === orderId);

@@ -20,6 +20,8 @@ export interface AgentOutcome {
   connectGoogle?: boolean;
   /** The request needs Hades Pro: the console opens the upgrade window. */
   upgrade?: boolean;
+  /** The analysis is a what-if: the console shows it as a simulation. */
+  simulate?: boolean;
 }
 
 const hasWorkspace = (u: StoredUser | null) => !!u && WORKSPACE_SCOPES.every((s) => u.google?.scope?.includes(s));
@@ -59,6 +61,7 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
   const actions: AgentAction[] = [];
   let reply = cmd.reply;
   let analyze: string | undefined;
+  let simulate = false;
   let connectGoogle = false;
 
   const capped = cmd.project && !hasPro(w) ? freeLimitMessage(w.project, cmd.project) : null;
@@ -99,6 +102,7 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
     try {
       if (intent.tool === "analyze_change") {
         analyze = String(intent.args.request);
+        simulate = intent.args.simulate === true;
         continue;
       }
       if (intent.tool === "nudge_owners") {
@@ -138,7 +142,7 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
   updateWorkspace(workspaceId, (x) => {
     x.agentThread = [...(x.agentThread ?? []), userTurn, agentTurn].slice(-MAX_THREAD);
   });
-  return { turn: agentTurn, analyze, connectGoogle };
+  return { turn: agentTurn, analyze, connectGoogle, simulate };
 }
 
 async function runGoogle(workspaceId: string, user: StoredUser, tool: string, args: Record<string, unknown>): Promise<{ reply: string; url?: string; summary: string }> {

@@ -158,6 +158,18 @@ const EXTRA: Record<string, Step[]> = {
 
 /** Whole-plan templates for work that is not an event with a stage: they replace the base steps. */
 const CUSTOM: Record<string, Step[]> = {
+  wedding: [
+    { key: "approve", title: "Fix the muhurat date, budget and guest count", days: 2, domain: "lead", after: [], priority: "high" },
+    { key: "venue", title: "Book the venue and rooms", days: 3, domain: "venue", after: ["approve"], priority: "high" },
+    { key: "caterer", title: "Caterer and menu tasting", days: 4, domain: "venue", after: ["venue"] },
+    { key: "decor", title: "Decor, florist and mandap", days: 4, domain: "marketing", after: ["venue"] },
+    { key: "invites", title: "Send invitations and track RSVPs", days: 5, domain: "registration", after: ["approve"], priority: "high" },
+    { key: "photo", title: "Photographer and videographer", days: 2, domain: "marketing", after: ["approve"] },
+    { key: "music", title: "Mehendi, sangeet and music artists", days: 3, domain: "content", after: ["venue"] },
+    { key: "outfits", title: "Outfit and jewellery trials", days: 4, domain: "lead", after: ["approve"] },
+    { key: "travel", title: "Guest travel and stay", days: 3, domain: "registration", after: ["invites", "venue"] },
+    { key: "final", title: "Final vendor call and rehearsal", days: 1, domain: "lead", after: ["caterer", "decor", "photo", "music", "travel", "outfits"], priority: "critical" },
+  ],
   onboarding: [
     { key: "approve", title: "Confirm roles, start dates and budget", days: 2, domain: "lead", after: [], priority: "high" },
     { key: "offers", title: "Send offer letters and collect paperwork", days: 3, domain: "registration", after: ["approve"], priority: "high" },
@@ -208,14 +220,14 @@ const EVENT_WORDS: [RegExp, string][] = [
   [/banquet|ballroom|hotel|gala|corporate dinner|reception hall|catering order/i, "banquet"],
   [/hackathon|hack day|buildathon/i, "hackathon"],
   [/conference|summit|symposium|meetup|workshop/i, "conference"],
-  [/wedding|reception|marriage|sangeet/i, "wedding"],
+  [/wedding|reception|marriage|sangeet|shaadi|engagement/i, "wedding"],
   [/birthday|party|anniversary|farewell|reunion|celebration|baby shower/i, "party"],
   [/fest|festival|cultural|college/i, "fest"],
   [/launch|product|demo day/i, "launch"],
 ];
 
 const DOMAIN_WORDS: Record<Domain, RegExp> = {
-  lead: /lead|head|organi[sz]er|manager|coordinator/i,
+  lead: /lead|head|organi[sz]er|manager|coordinator|planner|family/i,
   sponsor: /sponsor|finance|account|procure|partnership|budget|fund|sales/i,
   venue: /venue|logistic|vendor|ops|operation|hospitality|facilit|admin|housekeep|banquet|f&b|kitchen|catering|front\s*desk|\bit\b/i,
   marketing: /market|design|social|brand|pr\b|media|content creator/i,
@@ -418,6 +430,15 @@ export function runCommand(p: Project, raw: string, now = new Date(), opts: { ma
   const url = text.match(GOOGLE_URL)?.[0];
 
   if (/^(help|\?|what can you do)/i.test(text)) return { reply: AGENT_HELP, intents: [] };
+
+  // What-if: trace the ripple of a hypothetical change without touching the plan.
+  const whatIf = text.match(/^(?:what\s+if|what\s+happens\s+if|simulate|suppose|imagine)\s+(.+?)\??$/i);
+  if (whatIf) {
+    return {
+      reply: "Simulating that. Nothing changes unless you apply it.",
+      intents: [{ tool: "analyze_change", args: { request: whatIf[1], simulate: true } }],
+    };
+  }
 
   // Google Workspace
   if (url && /\b(add|append|write|note|log)\b/i.test(lower)) {

@@ -35,6 +35,18 @@ export interface Task {
   version: number;
   /** Earliest date the task may start (yyyy-mm-dd), e.g. "the shoot is on 12 Dec". */
   notBefore?: string;
+  /** An outside vendor responsible for this task, who answers from a link without signing up. */
+  vendor?: VendorLink;
+}
+
+export interface VendorLink {
+  name: string;
+  token: string;
+  status: "pending" | "confirmed" | "delayed";
+  delayDays?: number;
+  note?: string;
+  createdAt: string;
+  respondedAt?: string;
 }
 
 /** `from` must finish before `to` can start. */
@@ -376,14 +388,16 @@ export const FREE_FEATURES = [
   "Plan from a sentence, add people and tasks within those limits",
   "Mark tasks done and see dates re-plan",
   "Progress reports and teammate sign-in",
+  "Vendor links: vendors confirm or report a delay, no sign-up",
 ];
 
 export const PRO_FEATURES = [
   "Unlimited events, tasks and people",
-  "Change ripple analysis and approvals",
+  "Change ripple, what-if simulation and approvals",
+  "Run it from Telegram: forward a change, reply approve",
   "Google Workspace: Drive, tracker Sheet, plan Doc, Calendar",
   "Invites and updates emailed from your Gmail",
-  "Telegram and WhatsApp member agents, progress nudges",
+  "Telegram member agents and progress nudges",
   "Voice summaries",
 ];
 

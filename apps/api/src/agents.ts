@@ -1,5 +1,7 @@
 import {
+  analyzeChange,
   applyMemberUpdate,
+  approveChanges,
   hasPro,
   MEMBER_HELP,
   memberTaskSummary,
@@ -12,7 +14,79 @@ import {
 import { sendTelegram, sendTelegramVoice } from "./channels/telegram";
 import { sendWhatsApp } from "./channels/whatsapp";
 import { speak, voiceEnabled } from "./voice/elevenlabs";
-import { findLink, newId, resolveJoinCode, updateWorkspace } from "./store";
+import { emailApproval } from "./notify";
+import { findLink, getReport, getWorkspace, newId, resolveJoinCode, saveReport, updateWorkspace } from "./store";
+
+/** The change the lead last traced from chat, waiting for "approve" or "reject". */
+const pendingByWorkspace = new Map<string, { reportId: string; simulate: boolean }>();
+
+const APPROVE = /^(?:approve|apply|yes|ok|okay|go ahead|make it real|do it)\b/i;
+const REJECT = /^(?:reject|no|cancel|discard|drop it)\b/i;
+const WHAT_IF = /^(?:what\s+if|what\s+happens\s+if|simulate|suppose|imagine)\s+(.+?)\??$/i;
+const CHANGE = /^(?:change|update)\s*[:\-]\s*(.+)$/i;
+
+/** The lead runs the plan from chat: forward a change, see the ripple, reply "approve". */
+async function leadCommand(ws: WorkspaceState, text: string, channel: ChatChannel, force: boolean): Promise<string | null> {
+  const t = text.trim();
+  const pending = pendingByWorkspace.get(ws.id);
+  const lead = ws.project.members[0];
+
+  if (pending && APPROVE.test(t)) {
+    pendingByWorkspace.delete(ws.id);
+    const report = getReport(pending.reportId);
+    if (!report) return "That change has expired. Send it again.";
+    const ids = report.changes.filter((c) => c.recommended).map((c) => c.id);
+    if (!ids.length) return "There was nothing to apply for that change.";
+    const before = ws.project;
+    let out: ReturnType<typeof approveChanges>;
+    try {
+      out = approveChanges(ws.project, report, ids, lead.name);
+    } catch {
+      return "The plan changed since I traced that. Send the change again and I'll re-check it.";
+    }
+    const next = updateWorkspace(ws.id, (x) => {
+      x.project = out.project;
+      x.history.push(
+        { id: newId(8), at: new Date().toISOString(), actor: "orchestrator", action: "analysis_completed", summary: report.feasibility.headline, projectVersion: report.projectVersion },
+        ...out.events,
+      );
+      x.messages.push(...out.messages.filter((m) => m.memberId !== lead.id));
+      x.reassessment = null;
+    });
+    await deliver(ws.id, out.messages.filter((m) => m.memberId !== lead.id), next);
+    const chosen = report.changes.filter((c) => ids.includes(c.id)).map((c) => c.summary);
+    const mailed = await emailApproval(getWorkspace(ws.id), null, report, before, out.project, chosen).catch(() => ({ sent: [] as string[] }));
+    const told = new Set(out.messages.filter((m) => m.memberId !== lead.id).map((m) => m.memberId)).size;
+    return `Done. Applied ${ids.length} change${ids.length === 1 ? "" : "s"}.\n${chosen.map((c) => `✓ ${c}`).join("\n")}\n\nBriefed ${told} teammate${told === 1 ? "" : "s"}${mailed.sent.length ? ` and emailed ${mailed.sent.length}` : ""}.`;
+  }
+  if (pending && REJECT.test(t)) {
+    pendingByWorkspace.delete(ws.id);
+    return pending.simulate ? "Discarded. Nothing changed." : "Rejected. The plan stays as it was.";
+  }
+
+  const wi = t.match(WHAT_IF);
+  const ch = t.match(CHANGE);
+  const request = wi?.[1] ?? ch?.[1] ?? (force ? t : null);
+  if (!request || request.length < 3) return null;
+
+  const report = analyzeChange(ws.project, request);
+  saveReport(report);
+  const simulate = !!wi;
+  updateWorkspace(ws.id, (x) =>
+    x.history.push({ id: newId(8), at: report.createdAt, actor: lead.name, action: "change_requested", summary: `${simulate ? "What-if" : "From " + (channel === "telegram" ? "Telegram" : "WhatsApp")}: ${request}`, projectVersion: x.project.version }),
+  );
+  const recs = report.changes.filter((c) => c.recommended);
+  if (!report.changes.length) return `I read that as: ${report.interpretation}\nIt doesn't change any dates. Nothing to apply.`;
+  pendingByWorkspace.set(ws.id, { reportId: report.id, simulate });
+  return [
+    simulate ? "What-if (nothing has changed yet):" : "Here's the ripple:",
+    report.feasibility.headline,
+    "",
+    ...(recs.length ? recs : report.changes).slice(0, 5).map((c) => `→ ${c.summary}`),
+    "",
+    simulate ? 'Reply "make it real" to apply it, or "discard".' : 'Reply "approve" to apply and brief the team, or "reject".',
+  ].join("\n");
+}
 
 type ChatChannel = Exclude<Channel, "web">;
 
@@ -99,8 +173,20 @@ export async function handleInbound(channel: ChatChannel, address: string, text:
   const member = workspace.project.members.find((m) => m.id === link.memberId);
   if (!member) return "You're no longer on this project.";
 
+  const isLead = member.id === workspace.project.members[0].id;
+  if (isLead) {
+    const lead = await leadCommand(workspace, text, channel, false);
+    if (lead) return lead;
+  }
+
   const parsed = parseMemberMessage(workspace.project, member.id, text);
-  if (parsed.kind === "help") return MEMBER_HELP;
+  // The lead talks about the whole plan; only an explicit task id ("T3 needs 2 more days") is a personal update.
+  const leadChange = isLead && (parsed.kind === "unclear" || (parsed.kind === "update" && parsed.estimateDays != null && !/\bT\d+\b/i.test(text)));
+  if (leadChange) {
+    const lead = await leadCommand(workspace, text, channel, true);
+    if (lead) return lead;
+  }
+  if (parsed.kind === "help") return isLead ? `${MEMBER_HELP}\n\nAs the event lead you can also forward any change ("the venue moved to Friday", "what if the caterer is 3 days late?") and reply "approve" to re-plan.` : MEMBER_HELP;
   if (parsed.kind === "tasks") return memberTaskSummary(workspace.project, member.id);
 
   const at = new Date().toISOString();

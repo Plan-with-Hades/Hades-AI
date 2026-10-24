@@ -11,13 +11,13 @@ import { speak, voiceEnabled } from "./voice/elevenlabs";
 import { runAgent } from "./hades-agent";
 import { emailApproval, emailUpdate } from "./notify";
 import { inviteMember } from "./invites";
-import { addMember, blankProject, progressReport, updateTask } from "@hades/core";
+import { addMember, blankProject, progressReport, scheduleProject, updateTask } from "@hades/core";
 import { syncTracker } from "./google-workspace";
 import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
 import { parseUpdate, startTelegram, telegramWebhookInfo, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
 import { createPinelabsOrder, getPinelabsOrder, isPaidStatus, pinelabsConfigured, pinelabsMode, verifyPinelabsRedirect } from "./payments/pinelabs";
-import { allUsers, allWorkspaces, createWorkspace, getUser, initStore, recordView, trafficSummary, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
+import { allUsers, allWorkspaces, createWorkspace, findVendor, getUser, initStore, recordView, trafficSummary, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
 
 /**
  * Hades API. Agents propose; this server enforces version checks, ownership, approval gating,
@@ -239,15 +239,15 @@ app.post(
 app.post(
   "/api/workspaces/:id/analyze",
   h((req, res) => {
-    const { request } = z.object({ request: z.string().trim().min(3).max(2000) }).parse(req.body);
+    const { request, simulate } = z.object({ request: z.string().trim().min(3).max(2000), simulate: z.boolean().optional() }).parse(req.body);
     const id = param(req, "id");
     const w = getWorkspace(id);
-    requirePro(w, "Change analysis");
+    requirePro(w, simulate ? "What-if simulation" : "Change analysis");
     const report = analyzeChange(w.project, request);
     if (agenticorgEnabled()) report.review = pendingReview();
     saveReport(report);
     updateWorkspace(id, (x) =>
-      x.history.push({ id: newId(8), at: report.createdAt, actor: x.project.members[0].name, action: "change_requested", summary: request, projectVersion: x.project.version }),
+      x.history.push({ id: newId(8), at: report.createdAt, actor: x.project.members[0].name, action: "change_requested", summary: simulate ? `What-if: ${request}` : request, projectVersion: x.project.version }),
     );
     res.status(201).json(report);
     if (report.review) void runAgentReview(id, report.id);
@@ -397,6 +397,83 @@ app.post(
       x.history = [{ id: newId(8), at: new Date().toISOString(), actor: fresh.members[0].name, action: "project_created", summary: "Cleared the event. Starting from an empty plan", projectVersion: 1 }];
     });
     res.json(view(ws));
+  }),
+);
+
+/* ---------------- Vendors: confirm or delay from a link, no sign-up ---------------- */
+
+app.post(
+  "/api/workspaces/:id/tasks/:taskId/vendor",
+  h((req, res) => {
+    const { name } = z.object({ name: z.string().trim().min(1).max(80) }).parse(req.body);
+    const id = param(req, "id");
+    const w = getWorkspace(id);
+    const u = currentUser(req);
+    if (w.ownerId && roleIn(w, u) !== "manager") return res.status(403).json({ error: "Only the event manager can add vendors." });
+    const task = w.project.tasks.find((t) => t.id === param(req, "taskId"));
+    if (!task) return res.status(404).json({ error: "Task not found." });
+    const token = `${newId(6)}${newId(6)}`;
+    const ws = updateWorkspace(id, (x) => {
+      const t = x.project.tasks.find((y) => y.id === task.id)!;
+      t.vendor = { name, token, status: "pending", createdAt: new Date().toISOString() };
+      x.history.push({ id: newId(8), at: new Date().toISOString(), actor: u?.name ?? x.project.members[0].name, action: "plan_edited", summary: `Added vendor ${name} to ${task.id} "${task.title}"`, projectVersion: x.project.version });
+    });
+    res.status(201).json({ link: `${WEB_URL}/v/${token}`, workspace: view(ws, roleIn(ws, u)) });
+  }),
+);
+
+function vendorView(token: string) {
+  const hit = findVendor(token);
+  if (!hit) return null;
+  const { workspace: w, task } = hit;
+  const st = scheduleProject(w.project).tasks[task.id];
+  return {
+    event: w.project.name,
+    eventDate: w.project.deadline,
+    task: { id: task.id, title: task.title, start: st?.startDate ?? null, finish: st?.endDate ?? null },
+    vendor: task.vendor!,
+    manager: w.project.members[0]?.name ?? "the organiser",
+  };
+}
+
+app.get("/api/vendor/:token", (req, res) => {
+  const v = vendorView(param(req, "token"));
+  if (!v) return res.status(404).json({ error: "This vendor link is no longer valid." });
+  res.json(v);
+});
+
+app.post(
+  "/api/vendor/:token",
+  h(async (req, res) => {
+    const b = z.object({ status: z.enum(["confirmed", "delayed"]), delayDays: z.number().int().min(1).max(60).optional(), note: z.string().trim().max(500).optional() }).parse(req.body);
+    const token = param(req, "token");
+    const hit = findVendor(token);
+    if (!hit) return res.status(404).json({ error: "This vendor link is no longer valid." });
+    const { workspace: w, task } = hit;
+    const before = w.project;
+    const now = new Date().toISOString();
+    const days = b.status === "delayed" ? (b.delayDays ?? 1) : 0;
+    const vendorName = task.vendor!.name;
+    const project = days ? updateTask(w.project, task.id, { estimateDays: (task.estimateDays ?? 2) + days }) : w.project;
+    const sched = scheduleProject(project);
+    const headline = days
+      ? sched.feasible
+        ? `${vendorName} is ${days} day(s) late on ${task.id}. The event date still holds.`
+        : `${vendorName} is ${days} day(s) late on ${task.id}. The plan now lands ${sched.finishDate}, after the event date.`
+      : `${vendorName} confirmed ${task.id} "${task.title}".`;
+    const lead = w.project.members[0];
+    const ws = updateWorkspace(w.id, (x) => {
+      x.project = project;
+      const t = x.project.tasks.find((y) => y.id === task.id)!;
+      t.vendor = { ...task.vendor!, status: b.status, delayDays: days || undefined, note: b.note, respondedAt: now };
+      x.history.push({ id: newId(8), at: now, actor: vendorName, action: "member_update", summary: `${headline}${b.note ? ` Note: "${b.note}"` : ""}`, projectVersion: x.project.version });
+      if (lead) x.messages.push({ id: newId(8), memberId: lead.id, at: now, from: "agent", text: `Vendor update: ${headline}${b.note ? `\n"${b.note}"` : ""}`, taskIds: [task.id] });
+    });
+    if (hasPro(ws)) {
+      if (days) await emailUpdate(ws, null, before, ws.project, task.id, `${vendorName} reported a delay of ${days} day(s).${b.note ? ` "${b.note}"` : ""}`, headline).catch(() => undefined);
+      await alertLead(ws, `Vendor update: ${headline}${b.note ? `\n"${b.note}"` : ""}`).catch(() => undefined);
+    }
+    res.json({ ok: true, headline, view: vendorView(token) });
   }),
 );
 

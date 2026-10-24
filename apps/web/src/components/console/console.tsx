@@ -112,6 +112,7 @@ export function Console() {
   const [localThread, setLocalThread] = useState<AgentTurn[]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [simulating, setSimulating] = useState(false);
   const [needsGoogle, setNeedsGoogle] = useState(false);
   const timers = useRef<number[]>([]);
   const online = ws !== null;
@@ -228,17 +229,18 @@ export function Console() {
 
   /* ---------------- Analysis ---------------- */
   const analyze = useCallback(
-    async (text: string) => {
+    async (text: string, simulate = false) => {
       if (!state || !text.trim()) return;
       timers.current.forEach(clearTimeout);
       let r: ImpactReport;
       try {
-        r = ws ? await api.analyze(ws.id, text) : analyzeChange(state.project, text);
+        r = ws ? await api.analyze(ws.id, text, simulate) : analyzeChange(state.project, text);
       } catch (e) {
         fail(e);
         return;
       }
       setReport(r);
+      setSimulating(simulate);
       setTab("ripple");
       setDecisions(Object.fromEntries(r.changes.map((c) => [c.id, c.recommended])));
       setPhase("analyzing");
@@ -471,7 +473,7 @@ export function Console() {
         }
         if (out.analyze) {
           setRequest(out.analyze);
-          await analyze(out.analyze);
+          await analyze(out.analyze, !!out.simulate);
         }
       } catch (e) {
         fail(e);
@@ -714,6 +716,20 @@ export function Console() {
                 canToggle={project.tasks.some((t) => t.id === selected) && !report}
                 busy={busy}
                 onStatus={(s) => setTaskStatus(selected, s)}
+                onVendor={
+                  ws && ws.role !== "member" && project.tasks.some((t) => t.id === selected)
+                    ? async (name) => {
+                        try {
+                          const out = await api.addVendor(ws.id, selected, name);
+                          applyServer(out.workspace);
+                          return out.link;
+                        } catch (e) {
+                          fail(e);
+                          return null;
+                        }
+                      }
+                    : undefined
+                }
               />
             ) : null}
           </div>
@@ -782,19 +798,34 @@ export function Console() {
                 </button>
               ))}
             </div>
-            <button
-              onClick={() => analyze(request)}
-              disabled={!request.trim() || phase === "analyzing"}
-              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-styx px-4 py-3 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-40"
-            >
-              {phase === "analyzing" ? "Agents are working…" : "Trace the ripple"}
-              <span aria-hidden className="font-mono text-xs opacity-70">Ctrl ↵</span>
-            </button>
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => analyze(request)}
+                disabled={!request.trim() || phase === "analyzing"}
+                className="flex flex-[2] items-center justify-center gap-2 rounded-xl bg-styx px-4 py-3 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-40"
+              >
+                {phase === "analyzing" ? "Agents are working…" : "Trace the ripple"}
+                <span aria-hidden className="font-mono text-xs opacity-70">Ctrl ↵</span>
+              </button>
+              <button
+                onClick={() => analyze(request, true)}
+                disabled={!request.trim() || phase === "analyzing"}
+                title="See the ripple without changing anything"
+                className="flex-1 rounded-xl border border-line-2 px-3 py-3 text-sm font-semibold text-text transition hover:border-styx disabled:opacity-40"
+              >
+                What if?
+              </button>
+            </div>
           </div>
 
           <div className="flex-1 overflow-y-auto">
             {report ? (
               <div className="space-y-4 p-4 sm:p-5">
+                {simulating ? (
+                  <p className="rounded-xl border border-warn/40 bg-[var(--warn-soft)] px-3.5 py-2.5 text-[12.5px] leading-snug text-text">
+                    <b>What-if simulation.</b> Nothing has changed. Apply it to make it real, or discard it.
+                  </p>
+                ) : null}
                 <div>
                   <span className="label">Interpreted as</span>
                   <p className="mt-1.5 text-sm leading-relaxed">{report.interpretation}</p>
@@ -875,15 +906,24 @@ export function Console() {
                     ) : null}
 
                     <div className="sticky bottom-0 -mx-4 flex gap-2 border-t border-line bg-bg-2/95 p-4 backdrop-blur sm:-mx-5 sm:px-5">
-                      <button onClick={reject} className="flex-1 rounded-xl border border-line-2 px-4 py-3 text-sm font-semibold text-muted transition hover:text-text">
-                        Reject
+                      <button
+                        onClick={() => {
+                          if (!simulating) return reject();
+                          setReport(null);
+                          setPhase("idle");
+                          setSimulating(false);
+                          flash("What-if discarded. Nothing changed.");
+                        }}
+                        className="flex-1 rounded-xl border border-line-2 px-4 py-3 text-sm font-semibold text-muted transition hover:text-text"
+                      >
+                        {simulating ? "Discard" : "Reject"}
                       </button>
                       <button
                         onClick={approve}
                         disabled={chosenCount === 0}
                         className="flex-[2] rounded-xl bg-text px-4 py-3 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-40"
                       >
-                        Approve {chosenCount} &amp; brief the team
+                        {simulating ? `Make it real (${chosenCount})` : <>Approve {chosenCount} &amp; brief the team</>}
                       </button>
                     </div>
                   </>
@@ -1140,6 +1180,7 @@ function TaskDrawer({
   canToggle,
   busy,
   onStatus,
+  onVendor,
 }: {
   project: Project;
   taskId: string;
@@ -1148,7 +1189,10 @@ function TaskDrawer({
   canToggle: boolean;
   busy: boolean;
   onStatus: (s: "done" | "not_started") => void;
+  onVendor?: (name: string) => Promise<string | null>;
 }) {
+  const [vendorName, setVendorName] = useState("");
+  const [vendorCopied, setVendorCopied] = useState(false);
   const t = project.tasks.find((x) => x.id === taskId);
   if (!t) return null;
   const owner = project.members.find((m) => m.id === t.ownerId);
@@ -1185,6 +1229,40 @@ function TaskDrawer({
           </div>
         ) : null}
       </dl>
+      {t.vendor ? (
+        <div className="mt-3 rounded-lg border border-line bg-bg-2 p-2.5 text-[12px]">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-semibold">Vendor: {t.vendor.name}</span>
+            <span className={`font-mono text-[10px] ${t.vendor.status === "confirmed" ? "text-ok" : t.vendor.status === "delayed" ? "text-ember" : "text-dim"}`}>
+              {t.vendor.status === "delayed" ? `delayed ${t.vendor.delayDays ?? ""}d` : t.vendor.status}
+            </span>
+          </div>
+          {t.vendor.note ? <p className="mt-1 text-muted">“{t.vendor.note}”</p> : null}
+          {onVendor ? (
+            <VendorShare link={`${typeof window !== "undefined" ? window.location.origin : ""}/v/${t.vendor.token}`} task={t.title} />
+          ) : null}
+        </div>
+      ) : onVendor ? (
+        <form
+          className="mt-3 flex gap-1.5"
+          onSubmit={async (e) => {
+            e.preventDefault();
+            if (!vendorName.trim()) return;
+            const link = await onVendor(vendorName.trim());
+            if (link) {
+              try {
+                await navigator.clipboard.writeText(link);
+                setVendorCopied(true);
+              } catch {}
+              setVendorName("");
+            }
+          }}
+        >
+          <input value={vendorName} onChange={(e) => setVendorName(e.target.value)} placeholder="Vendor name (e.g. Sharma Caterers)" className="min-w-0 flex-1 rounded-lg border border-line-2 bg-bg-2 px-2.5 py-1.5 text-[12px] outline-none focus:border-styx" />
+          <button className="whitespace-nowrap rounded-lg border border-line-2 px-2.5 py-1.5 text-[12px] font-semibold hover:border-styx">Add vendor link</button>
+        </form>
+      ) : null}
+      {vendorCopied ? <p className="mt-1 text-[11px] text-ok">Vendor link copied. Send it to them: they confirm or report a delay, no sign-up.</p> : null}
       {canToggle ? (
         <button
           onClick={() => onStatus(t.status === "done" ? "not_started" : "done")}
@@ -1203,6 +1281,30 @@ function TaskDrawer({
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+function VendorShare({ link, task }: { link: string; task: string }) {
+  const [copied, setCopied] = useState(false);
+  const msg = `Please confirm "${task}" or tell us about any delay here:`;
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      <button
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(link);
+            setCopied(true);
+            window.setTimeout(() => setCopied(false), 1500);
+          } catch {}
+        }}
+        className="rounded-md border border-line-2 px-2 py-1 font-mono text-[10px] hover:border-styx"
+      >
+        {copied ? "Copied" : "Copy vendor link"}
+      </button>
+      <a href={`https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" className="rounded-md border border-line-2 px-2 py-1 font-mono text-[10px] hover:border-styx">
+        Send on Telegram
+      </a>
     </div>
   );
 }
@@ -1624,7 +1726,7 @@ function ConnectModal({
                 <span className="label">Telegram</span>
                 <p className="mt-1 text-muted">
                   {meta?.telegram.bot ? (
-                    <>Tap the link for each teammate. It opens @{meta.telegram.bot} and links them.</>
+                    <>Tap the link for each teammate. It opens @{meta.telegram.bot} and links them. Link yourself too: forward any change to the bot and reply “approve” to re-plan.</>
                   ) : (
                     "Not configured on the server yet (TELEGRAM_BOT_TOKEN)."
                   )}

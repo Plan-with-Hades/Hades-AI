@@ -28,12 +28,14 @@ const AGENTS = [
   { name: "Scope agent", q: "What work needs to change?", tone: "text-styx-2", note: "Maps the request to tasks" },
   { name: "Conflict agent", q: "What breaks, and who is affected?", tone: "text-ember", note: "Walks the dependency graph" },
   { name: "Timeline agent", q: "Can we still make the date?", tone: "text-ok", note: "Deterministic scheduler" },
-  { name: "Member agents", q: "What does this mean for you?", tone: "text-warn", note: "WhatsApp, voice, web" },
+  { name: "Member agents", q: "What does this mean for you?", tone: "text-warn", note: "Telegram, voice, web" },
 ];
 
 const CHANNELS = [
   { name: "Web console", d: "The graph, the impact report and the approve button.", tag: "Live" },
-  { name: "WhatsApp & Telegram", d: "Teammates report blockers and get briefed where they already are.", tag: "Live" },
+  { name: "Telegram", d: "Forward a change to the bot, see the ripple, reply approve. Teammates report blockers and get briefed in the same chat.", tag: "Live" },
+  { name: "What-if simulation", d: "Ask “what if the caterer is 3 days late?” and see every date it moves before you commit to anything.", tag: "Live" },
+  { name: "Vendor links", d: "Send a vendor one link. They confirm or report a delay without signing up, and the plan re-plans itself.", tag: "Live" },
   { name: "Voice check-ins", d: "Hades calls a teammate to confirm an estimate, with Vobiz telephony and an ElevenLabs voice.", tag: "Building" },
   { name: "Google Pay checkout", d: "Start with a 3-day free trial, then upgrade a team to Pro by paying ₹199 with Google Pay or any UPI app.", tag: "Live" },
 ];
@@ -119,7 +121,7 @@ export default function Home() {
             <dl className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-3">
               {[
                 ["Ripple", "A lost sponsor hits posters, vendors and passes."],
-                ["Chasing", "Updates live in WhatsApp groups, not the plan."],
+                ["Chasing", "Updates live in Telegram groups, not the plan."],
                 ["Too late", "Clashes surface the night before the event."],
               ].map(([k, v]) => (
                 <div key={k} className="bg-bg-2/75 backdrop-blur-md p-5">
