@@ -94,7 +94,7 @@ export const api = {
   me: () => call<Me>("/api/me"),
   createWorkspace: (blank = false) => post<ServerWorkspace>("/api/workspaces", blank ? { blank: true } : undefined),
   agent: (id: string, message: string) =>
-    post<{ turn: AgentTurn; analyze?: string; connectGoogle?: boolean; workspace: ServerWorkspace }>(`/api/workspaces/${id}/agent`, { message }),
+    post<{ turn: AgentTurn; analyze?: string; connectGoogle?: boolean; upgrade?: boolean; workspace: ServerWorkspace }>(`/api/workspaces/${id}/agent`, { message }),
   workspace: (id: string, since?: string) =>
     call<ServerWorkspace | { changed: false; updatedAt: string }>(`/api/workspaces/${id}${since ? `?since=${encodeURIComponent(since)}` : ""}`),
   claim: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/claim`),

@@ -1,5 +1,6 @@
 import {
   applyMemberUpdate,
+  hasPro,
   MEMBER_HELP,
   memberTaskSummary,
   parseMemberMessage,
@@ -31,6 +32,7 @@ async function send(channel: ChatChannel, address: string, text: string) {
 
 /** Member agents: push messages to every chat a teammate has linked. Web-only teammates read them in the console. */
 export async function deliver(workspaceId: string, messages: MemberMessage[], ws: WorkspaceState) {
+  if (!hasPro(ws)) return; // chat agents are a Pro feature
   for (const m of messages) {
     const links = ws.links.filter((l) => l.memberId === m.memberId);
     for (const l of links) {
@@ -93,6 +95,7 @@ export async function handleInbound(channel: ChatChannel, address: string, text:
     return "Hi! I'm the Hades agent. To connect, send your join code from the Hades console, like: hades abc123-rohan";
   }
   const { workspace, link } = found;
+  if (!hasPro(workspace)) return "This event is on the free plan, where chat agents are switched off. The event manager can upgrade to Hades Pro to turn them back on.";
   const member = workspace.project.members.find((m) => m.id === link.memberId);
   if (!member) return "You're no longer on this project.";
 

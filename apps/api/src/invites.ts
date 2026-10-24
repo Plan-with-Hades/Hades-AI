@@ -1,4 +1,4 @@
-import type { Member, WorkspaceState } from "@hades/core";
+import { hasPro, type Member, type WorkspaceState } from "@hades/core";
 import { GMAIL_SCOPE, googleAccessToken } from "./auth";
 import { shareFile } from "./google-workspace";
 import { getUser, getWorkspace, newId, updateWorkspace, type StoredUser } from "./store";
@@ -86,6 +86,14 @@ export async function inviteMember(workspaceId: string, manager: StoredUser | nu
   if (!m?.email) throw Object.assign(new Error("Add an email for this teammate first."), { status: 400 });
   const out: InviteResult = { memberId, email: m.email, emailed: false, shared: false, link: eventLink(w) };
   const notes: string[] = [];
+  if (!hasPro(w)) {
+    out.note = "Emailing invites and sharing the Drive folder are Pro features. Share the link with them yourself.";
+    updateWorkspace(workspaceId, (x) => {
+      const mm = x.project.members.find((y) => y.id === memberId);
+      if (mm) mm.invitedAt = new Date().toISOString();
+    });
+    return out;
+  }
   const owner = manager ?? (w.ownerId ? (getUser(w.ownerId) ?? null) : null);
   if (owner?.google?.scope?.includes(GMAIL_SCOPE)) {
     try {

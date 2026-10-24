@@ -1,4 +1,4 @@
-import { addTask, formatProgress, formatShort, progressReport, runCommand, updateTask, type AgentAction, type AgentTurn, type MemberMessage, type WorkspaceState } from "@hades/core";
+import { PRO_PRICE_INR, addTask, formatProgress, hasPro, formatShort, progressReport, runCommand, updateTask, type AgentAction, type AgentTurn, type MemberMessage, type WorkspaceState } from "@hades/core";
 import { WORKSPACE_SCOPES } from "./auth";
 import { deliver } from "./agents";
 import { syncCalendar } from "./google-calendar";
@@ -18,6 +18,8 @@ export interface AgentOutcome {
   analyze?: string;
   /** Set when the organiser must grant Google access first. */
   connectGoogle?: boolean;
+  /** The request needs Hades Pro: the console opens the upgrade window. */
+  upgrade?: boolean;
 }
 
 const hasWorkspace = (u: StoredUser | null) => !!u && WORKSPACE_SCOPES.every((s) => u.google?.scope?.includes(s));
@@ -38,6 +40,21 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
     };
     updateWorkspace(workspaceId, (x) => (x.agentThread = [...(x.agentThread ?? []), userTurn, agentTurn].slice(-MAX_THREAD)));
     return { turn: agentTurn };
+  }
+  // Pro-only tools: ripple analysis, Google Workspace and Calendar, nudges to teammates' chats.
+  const PRO_WHAT: Record<string, string> = { analyze_change: "Change analysis", nudge_owners: "Nudging teammates", calendar_sync: "Google Calendar sync" };
+  const proNeeded = cmd.intents.find((i) => i.tool in PRO_WHAT || i.tool.startsWith("google_"));
+  if (proNeeded && !hasPro(w)) {
+    const what = PRO_WHAT[proNeeded.tool] ?? "Google Workspace";
+    const agentTurn: AgentTurn = {
+      id: newId(8),
+      at: new Date().toISOString(),
+      role: "agent",
+      text: `${what} is a Hades Pro feature. Your free trial has ended, so I can still plan, add people and tasks, track progress and mark things done, but this one needs Pro (₹${PRO_PRICE_INR}/month).`,
+      engine: "rules",
+    };
+    updateWorkspace(workspaceId, (x) => (x.agentThread = [...(x.agentThread ?? []), userTurn, agentTurn].slice(-MAX_THREAD)));
+    return { turn: agentTurn, upgrade: true };
   }
   const actions: AgentAction[] = [];
   let reply = cmd.reply;

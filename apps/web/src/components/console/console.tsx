@@ -10,6 +10,8 @@ import {
   blankProject,
   DEMO_REPLIES,
   formatShort,
+  FREE_FEATURES,
+  PRO_FEATURES,
   PRO_PRICE_INR,
   SAMPLE_REQUESTS,
   runCommand,
@@ -419,6 +421,11 @@ export function Console() {
     }
   };
 
+  const needPro = (what: string) => {
+    setUpgradeReason(`${what} is a Hades Pro feature. Your free trial has ended.`);
+    setUpgradeOpen(true);
+  };
+
   const syncCalendar = async () => {
     if (!ws) {
       flash("Google Calendar sync needs the Hades API.");
@@ -428,6 +435,7 @@ export function Console() {
       flash("Google sign-in isn't configured on the server yet.");
       return;
     }
+    if (ws.effectivePlan === "expired") return needPro("Google Calendar sync");
     if (!me || !me.calendarConnected) {
       window.location.href = api.signInUrl({ workspaceId: ws.id, calendar: true });
       return;
@@ -457,6 +465,10 @@ export function Console() {
         const out = await api.agent(ws.id, text);
         applyServer(out.workspace);
         if (out.connectGoogle) setNeedsGoogle(true);
+        if (out.upgrade) {
+          setUpgradeReason(out.turn.text);
+          setUpgradeOpen(true);
+        }
         if (out.analyze) {
           setRequest(out.analyze);
           await analyze(out.analyze);
@@ -602,14 +614,16 @@ export function Console() {
                   Google Drive ↗
                 </a>
               ) : (
-                <HeaderButton onClick={() => sendToAgent("Create a Google workspace")} disabled={agentBusy}>
+                <HeaderButton onClick={() => (ws?.effectivePlan === "expired" ? needPro("Google Workspace") : sendToAgent("Create a Google workspace"))} disabled={agentBusy}>
                   Create Google workspace
                 </HeaderButton>
               )
             ) : (
               <HeaderButton
                 onClick={() => {
-                  if (connectUrl) window.location.href = connectUrl;
+                  if (ws?.effectivePlan === "expired") return needPro("Google Workspace");
+                  if (!me && ws && meta?.google.enabled) window.location.href = api.signInUrl({ workspaceId: ws.id });
+                  else if (connectUrl) window.location.href = connectUrl;
                   else flash("Google sign-in isn't configured on the server yet.");
                 }}
               >
@@ -896,8 +910,11 @@ export function Console() {
           busy={busy}
           onPay={startCheckout}
           upi={meta?.upi ?? null}
+          signInUrl={ws && meta?.google.enabled ? api.signInUrl({ workspaceId: ws.id }) : null}
+          signedIn={!!me}
+          canPay={!!me && !!ws && ws.ownerId === me.id}
           onOpen={() => {
-            if (ws && meta?.upi) api.upiIntent(ws.id).catch(() => {});
+            if (ws && me && ws.ownerId === me.id && meta?.upi) api.upiIntent(ws.id).catch(() => {});
           }}
           pendingUpi={!!ws?.payments.some((p) => p.provider === "upi" && p.status === "pending")}
           onUpi={async (utr) => {
@@ -1378,6 +1395,9 @@ function UpgradeModal({
   pendingUpi,
   onUpi,
   onOpen,
+  signInUrl,
+  signedIn,
+  canPay,
 }: {
   reason: string | null;
   mode: Meta["payments"]["mode"] | null;
@@ -1388,6 +1408,9 @@ function UpgradeModal({
   pendingUpi: boolean;
   onUpi: (utr: string) => Promise<string | null>;
   onOpen: () => void;
+  signInUrl: string | null;
+  signedIn: boolean;
+  canPay: boolean;
 }) {
   useEffect(() => {
     onOpen();
@@ -1404,12 +1427,33 @@ function UpgradeModal({
         <span className="label">Hades Pro</span>
         <h2 className="display mt-2 text-2xl font-bold">₹{PRO_PRICE_INR} / team / month</h2>
         {reason ? <p className="mt-3 rounded-lg border border-ember/40 bg-[var(--ember-soft)] p-3 text-[13px] leading-snug text-text">{reason}</p> : null}
-        <ul className="mt-4 space-y-1.5 text-sm text-muted">
-          <li>Unlimited change analyses and approvals</li>
-          <li>Member agents on Telegram and WhatsApp</li>
-          <li>Google Calendar sync and full change history</li>
+        <p className="label mt-4">Pro includes</p>
+        <ul className="mt-2 space-y-1.5 text-sm text-text">
+          {PRO_FEATURES.map((f) => (
+            <li key={f}>✓ {f}</li>
+          ))}
         </ul>
-        {upi && upiLink ? (
+        <p className="label mt-4">Always free</p>
+        <ul className="mt-2 space-y-1 text-[12.5px] text-muted">
+          {FREE_FEATURES.map((f) => (
+            <li key={f}>• {f}</li>
+          ))}
+        </ul>
+        {!signedIn ? (
+          <div className="mt-5 rounded-xl border border-styx/40 bg-bg-2 p-4 text-[13px] text-muted">
+            Sign in with Google first. Pro is attached to your account, so you can only pay once you&apos;re signed in.
+            {signInUrl ? (
+              <a href={signInUrl} className="mt-3 block rounded-lg bg-text px-3 py-2.5 text-center text-sm font-semibold text-bg">
+                Sign in with Google to upgrade
+              </a>
+            ) : (
+              <span className="mt-2 block text-ember">Sign-in isn&apos;t configured on this server yet.</span>
+            )}
+          </div>
+        ) : !canPay ? (
+          <p className="mt-5 rounded-xl border border-line bg-bg-2 p-4 text-[13px] text-muted">Only the event manager can upgrade this event. Ask them to open Upgrade.</p>
+        ) : null}
+        {canPay && upi && upiLink ? (
           <div className="mt-5 rounded-xl border border-styx/40 bg-bg-2 p-4">
             <span className="label">Pay with Google Pay (UPI)</span>
             <div className="mt-3 flex items-center gap-4">

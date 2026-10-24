@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FREE_FEATURES, PRO_FEATURES } from "@hades/core";
 import { VideoBackground } from "@/components/video-bg";
 import { SiteNav } from "@/components/site-nav";
 import { Logo } from "@/components/logo";
@@ -244,15 +245,16 @@ export default function Home() {
           <h2 className="display mt-5 text-[clamp(28px,3.6vw,46px)] font-bold leading-[1.05]">Try everything free for 3 days.</h2>
           <div className="mt-12 grid gap-4 md:grid-cols-[1fr_1.2fr]">
             <div className="rounded-2xl border border-line bg-bg-2/75 backdrop-blur-md p-8">
-              <h3 className="display text-lg font-bold">Free trial</h3>
+              <h3 className="display text-lg font-bold">Free</h3>
               <p className="mt-2 font-mono text-3xl">
-                ₹0<span className="text-base text-muted"> · 3 days</span>
+                ₹0<span className="text-base text-muted"> · forever</span>
               </p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
-                <li>Every feature, no card needed</li>
-                <li>Sign in with Google</li>
-                <li>Your plan stays readable after the trial</li>
+                {FREE_FEATURES.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
               </ul>
+              <p className="label mt-6">Every Pro feature free for your first 3 days</p>
             </div>
             <div className="relative rounded-2xl border border-styx/40 bg-bg-2/75 backdrop-blur-md p-8 shadow-[0_0_60px_-20px_var(--styx)]">
               <h3 className="display text-lg font-bold">Hades Pro</h3>
@@ -260,9 +262,10 @@ export default function Home() {
                 ₹199<span className="text-base text-muted"> / team / month</span>
               </p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
-                <li>Unlimited change analyses and approvals</li>
-                <li>Member agents on Telegram and WhatsApp</li>
-                <li>Google Calendar sync and full change history</li>
+                <li className="text-text">Everything in Free, plus:</li>
+                {PRO_FEATURES.map((f) => (
+                  <li key={f}>{f}</li>
+                ))}
               </ul>
               <p className="label mt-6">Pay with Google Pay or any UPI app</p>
             </div>

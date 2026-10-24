@@ -354,6 +354,25 @@ export function effectivePlan(w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "
   return new Date(w.trialEndsAt).getTime() > now.getTime() ? "trial" : "expired";
 }
 
+/** Trial and Pro both unlock Pro features; only an expired trial or lapsed month drops to Free. */
+export const hasPro = (w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "proUntil">, now = new Date()) => effectivePlan(w, now) !== "expired";
+
+export const FREE_FEATURES = [
+  "One event with the full dependency graph",
+  "Plan events from a sentence, add people and tasks",
+  "Mark tasks done and see dates re-plan",
+  "Progress reports and teammate sign-in",
+];
+
+export const PRO_FEATURES = [
+  "Change ripple analysis and approvals",
+  "Unlimited events",
+  "Google Workspace: Drive, tracker Sheet, plan Doc, Calendar",
+  "Invites and updates emailed from your Gmail",
+  "Telegram and WhatsApp member agents, progress nudges",
+  "Voice summaries",
+];
+
 export interface PublicUser {
   id: string;
   email: string;

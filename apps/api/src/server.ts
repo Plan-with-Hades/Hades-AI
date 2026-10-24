@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
-import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, PRO_DAYS, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
+import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, FREE_FEATURES, hasPro, PRO_DAYS, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
 import { CALENDAR_SCOPE, completeGoogleLogin, currentUser, googleAuthUrl, googleEnabled, publicUser, requireUser, sessionFor, unseal, type OAuthState } from "./auth";
 import { syncCalendar } from "./google-calendar";
 import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agents";
@@ -80,16 +80,33 @@ app.get(
 const view = (w: WorkspaceState, role?: "manager" | "member" | "guest") => ({ ...w, effectivePlan: effectivePlan(w), ...(role ? { role } : {}) });
 
 /** Planning stops when the free trial ends; reading the plan and paying keep working. */
-function requireActivePlan(w: WorkspaceState) {
-  if (effectivePlan(w) === "expired") {
-    throw Object.assign(new Error(`Your ${TRIAL_DAYS}-day free trial has ended. Upgrade to Hades Pro (₹${PRO_PRICE_INR}/month) to keep planning.`), { status: 402 });
+function requirePro(w: WorkspaceState, what: string) {
+  if (!hasPro(w)) {
+    throw Object.assign(new Error(`${what} is a Hades Pro feature. Your ${TRIAL_DAYS}-day trial has ended; upgrade for ₹${PRO_PRICE_INR}/month to keep using it.`), { status: 402 });
   }
+}
+
+/** Paying needs a signed-in event manager: returns who is paying for which event. */
+function payer(req: express.Request, id: string) {
+  const u = requireUser(req);
+  const w = getWorkspace(id);
+  if (w.ownerId !== u.id) throw Object.assign(new Error("Sign in as the event manager to upgrade this event."), { status: 403 });
+  return { u, w };
 }
 
 app.post("/api/workspaces", (req, res) => {
   const u = currentUser(req);
   const blank = req.body?.blank === true;
-  res.status(201).json(view(createWorkspace(u ? { id: u.id, name: u.name, email: u.email } : undefined, { blank })));
+  let best: WorkspaceState | undefined;
+  if (u) {
+    const mine = workspacesOf(u).filter((x) => x.role === "manager").map((x) => x.w);
+    best = mine.find((x) => effectivePlan(x) === "pro") ?? mine.find((x) => hasPro(x));
+    if (mine.length && !best) return res.status(402).json({ error: "The free plan includes one event. Upgrade to Hades Pro for unlimited events." });
+  }
+  const created = createWorkspace(u ? { id: u.id, name: u.name, email: u.email } : undefined, { blank });
+  // New events share the account's plan: Pro or the same trial, never a fresh trial.
+  if (best) updateWorkspace(created.id, (x) => Object.assign(x, { plan: best!.plan, trialEndsAt: best!.trialEndsAt, proUntil: best!.proUntil }));
+  res.status(201).json(view(getWorkspace(created.id)));
 });
 
 /** Add a teammate by email and invite them with the manager's Google account. Managers only (or guest demos). */
@@ -135,7 +152,6 @@ app.post(
     const { status } = z.object({ status: z.enum(["done", "in_progress", "not_started", "blocked"]) }).parse(req.body);
     const id = param(req, "id");
     const w = getWorkspace(id);
-    requireActivePlan(w);
     const u = currentUser(req);
     const task = w.project.tasks.find((t) => t.id === param(req, "taskId"));
     if (!task) return res.status(404).json({ error: "Task not found." });
@@ -150,7 +166,7 @@ app.post(
     });
     // Keep Google in step: tracker sheet and calendar events, in the background.
     const owner = ws.ownerId ? getUser(ws.ownerId) : null;
-    const googleTouched = !!(ws.google?.tracker || ws.calendar);
+    const googleTouched = hasPro(ws) && !!(ws.google?.tracker || ws.calendar);
     if (owner?.google && googleTouched) {
       void (async () => {
         const done: string[] = [];
@@ -181,7 +197,6 @@ app.post(
   h(async (req, res) => {
     const { message } = z.object({ message: z.string().trim().min(1).max(2000) }).parse(req.body);
     const id = param(req, "id");
-    requireActivePlan(getWorkspace(id));
     const out = await runAgent(id, currentUser(req), message);
     res.json({ ...out, workspace: view(getWorkspace(id)) });
   }),
@@ -218,7 +233,7 @@ app.post(
     const { request } = z.object({ request: z.string().trim().min(3).max(2000) }).parse(req.body);
     const id = param(req, "id");
     const w = getWorkspace(id);
-    requireActivePlan(w);
+    requirePro(w, "Change analysis");
     const report = analyzeChange(w.project, request);
     if (agenticorgEnabled()) report.review = pendingReview();
     saveReport(report);
@@ -259,6 +274,7 @@ app.get(
   "/api/workspaces/:id/reports/:reportId/voice",
   h(async (req, res) => {
     if (!voiceEnabled()) return res.status(404).json({ error: "Voice is not configured." });
+    requirePro(getWorkspace(param(req, "id")), "Voice summaries");
     const report = getReport(param(req, "reportId"));
     if (!report || report.projectId !== param(req, "id")) return res.status(404).json({ error: "This analysis has expired. Run it again." });
     const brief = report.review?.status === "done" ? report.review.decisionBrief : "";
@@ -282,7 +298,7 @@ app.post(
     const report = getReport(reportId);
     if (!report || report.projectId !== id) return res.status(404).json({ error: "This analysis has expired. Run it again." });
     const w = getWorkspace(id);
-    requireActivePlan(w);
+    requirePro(w, "Approving changes");
     const beforeProject = w.project;
     const out = approveChanges(w.project, report, changeIds, w.project.members[0].name);
     for (const m of out.messages) {
@@ -342,8 +358,10 @@ app.post(
       x.reassessment = toStoredReassessment(out.reassessment);
     });
     const member = ws.project.members.find((m) => m.id === body.memberId);
-    if (body.memberId !== ws.project.members[0].id) await alertLead(ws, `${member?.name} on ${body.taskId}: "${body.note}"\n${out.reassessment.headline}`);
-    const emailed = await emailUpdate(getWorkspace(id), currentUser(req), beforeProject, ws.project, body.taskId, body.note, out.reassessment.headline).catch((e) => ({ sent: [] as string[], skipped: (e as Error).message, shifts: [] }));
+    if (hasPro(ws) && body.memberId !== ws.project.members[0].id) await alertLead(ws, `${member?.name} on ${body.taskId}: "${body.note}"\n${out.reassessment.headline}`);
+    const emailed = !hasPro(ws)
+      ? { sent: [] as string[], skipped: "Emailing updates is a Pro feature.", shifts: [] }
+      : await emailUpdate(getWorkspace(id), currentUser(req), beforeProject, ws.project, body.taskId, body.note, out.reassessment.headline).catch((e) => ({ sent: [] as string[], skipped: (e as Error).message, shifts: [] }));
     res.json({ ...view(ws), emailed: { sent: emailed.sent, skipped: emailed.skipped }, shifts: emailed.shifts });
   }),
 );
@@ -391,7 +409,7 @@ app.post(
   h((req, res) => {
     if (!UPI_VPA) return res.status(503).json({ error: "Google Pay isn't set up yet." });
     const id = param(req, "id");
-    const w = getWorkspace(id);
+    const { w } = payer(req, id);
     if (effectivePlan(w) === "pro") return res.json({ ok: true });
     const now = new Date().toISOString();
     if (!w.payments.some((p) => p.provider === "upi" && (p.status === "initiated" || p.status === "pending"))) {
@@ -412,7 +430,7 @@ app.post(
     if (!UPI_VPA) return res.status(503).json({ error: "Google Pay isn't set up yet." });
     const { utr } = z.object({ utr: z.string().trim().regex(/^[A-Za-z0-9]{10,24}$/, "Enter the 12-digit UPI reference (UTR) from Google Pay") }).parse(req.body);
     const id = param(req, "id");
-    const w = getWorkspace(id);
+    const { w } = payer(req, id);
     if (w.payments.some((p) => p.utr === utr)) return res.status(409).json({ error: "We already have this payment. It will be confirmed shortly." });
     const now = new Date().toISOString();
     const ref = `upi-${id}-${Date.now()}`;
@@ -466,9 +484,8 @@ app.post(
   "/api/workspaces/:id/checkout",
   h(async (req, res) => {
     const id = param(req, "id");
-    const w = getWorkspace(id);
+    const { u: buyer, w } = payer(req, id);
     if (effectivePlan(w) === "pro") return res.status(409).json({ error: "This team is already on Pro." });
-    const buyer = currentUser(req);
     const reference = `hades-${id}-${Date.now()}`;
     const now = new Date().toISOString();
     if (pinelabsConfigured()) {
@@ -491,7 +508,7 @@ app.post(
 function markPaid(orderId: string, status: "authorized" | "captured" | "failed") {
   const hit = findPayment(orderId);
   if (!hit) return null;
-  return updateWorkspace(hit.workspace.id, (x) => {
+  const result = updateWorkspace(hit.workspace.id, (x) => {
     const p = x.payments.find((q) => q.orderId === orderId)!;
     if (p.status === "captured" || p.status === "authorized") return; // already granted
     p.status = status;
@@ -510,6 +527,12 @@ function markPaid(orderId: string, status: "authorized" | "captured" | "failed")
       projectVersion: x.project.version,
     });
   });
+  if (status !== "failed" && result.ownerId) {
+    for (const other of allWorkspaces()) {
+      if (other.id !== result.id && other.ownerId === result.ownerId) updateWorkspace(other.id, (x) => Object.assign(x, { plan: "pro", proUntil: result.proUntil }));
+    }
+  }
+  return result;
 }
 
 /**
@@ -641,6 +664,7 @@ app.post(
   h(async (req, res) => {
     const u = requireUser(req);
     const w = getWorkspace(param(req, "id"));
+    requirePro(w, "Google Calendar sync");
     if (w.ownerId !== u.id) return res.status(403).json({ error: "Only the workspace owner can sync it to their calendar." });
     if (!u.google?.scope?.includes(CALENDAR_SCOPE)) return res.status(409).json({ error: "Connect Google Calendar first.", connect: true });
     const out = await syncCalendar(u, w);
