@@ -5,6 +5,8 @@ import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, ef
 import { CALENDAR_SCOPE, completeGoogleLogin, currentUser, googleAuthUrl, googleEnabled, publicUser, requireUser, sessionFor, unseal, type OAuthState } from "./auth";
 import { syncCalendar } from "./google-calendar";
 import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agents";
+import { speak, voiceEnabled } from "./voice/elevenlabs";
+import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
 import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
 import { createPinelabsOrder, pinelabsConfigured, pinelabsMode, verifyPinelabsSignature } from "./payments/pinelabs";
@@ -49,6 +51,8 @@ app.get(
       google: { enabled: googleEnabled() },
       telegram: { enabled: telegramEnabled(), bot: await telegramBotUsername() },
       whatsapp: { enabled: whatsappEnabled(), number: WHATSAPP_FROM.replace(/^whatsapp:/, "") || null },
+      agenticorg: { enabled: agenticorgEnabled() },
+      voice: { enabled: voiceEnabled() },
     });
   }),
 );
@@ -102,13 +106,59 @@ app.post(
     const w = getWorkspace(id);
     requireActivePlan(w);
     const report = analyzeChange(w.project, request);
+    if (agenticorgEnabled()) report.review = pendingReview();
     saveReport(report);
     updateWorkspace(id, (x) =>
       x.history.push({ id: newId(8), at: report.createdAt, actor: x.project.members[0].name, action: "change_requested", summary: request, projectVersion: x.project.version }),
     );
     res.status(201).json(report);
+    if (report.review) void runAgentReview(id, report.id);
   }),
 );
+
+/** Second opinion from the AgenticOrg coordinator. Runs after the response; the console polls the report. */
+async function runAgentReview(workspaceId: string, reportId: string) {
+  const report = getReport(reportId);
+  if (!report) return;
+  const review = await reviewWithAgenticOrg(getWorkspace(workspaceId).project, report);
+  saveReport({ ...report, review });
+  const summary =
+    review.status === "done"
+      ? `AgenticOrg run ${review.runId ?? "?"}: ${review.recommendedChangeIds.length}/${report.changes.length} edits recommended${review.hitl ? ", needs the lead's approval" : ""}${review.confidence != null ? ` (confidence ${Math.round(review.confidence * 100)}%)` : ""}`
+      : `AgenticOrg review failed: ${review.error}`;
+  console.log(`[agenticorg] ${workspaceId} ${reportId} ${summary} in ${review.durationMs}ms`);
+  updateWorkspace(workspaceId, (x) =>
+    x.history.push({
+      id: newId(8),
+      at: new Date().toISOString(),
+      actor: "agenticorg",
+      action: "agent_review",
+      summary,
+      projectVersion: report.projectVersion,
+      meta: { reportId, runId: review.runId, status: review.status, confidence: review.confidence, escalate: review.escalate, hitl: review.hitl },
+    }),
+  );
+}
+
+/** The impact summary read aloud by ElevenLabs (MP3). */
+app.get(
+  "/api/workspaces/:id/reports/:reportId/voice",
+  h(async (req, res) => {
+    if (!voiceEnabled()) return res.status(404).json({ error: "Voice is not configured." });
+    const report = getReport(param(req, "reportId"));
+    if (!report || report.projectId !== param(req, "id")) return res.status(404).json({ error: "This analysis has expired. Run it again." });
+    const brief = report.review?.status === "done" ? report.review.decisionBrief : "";
+    const text = [report.feasibility.headline, brief || report.interpretation].filter(Boolean).join(" ");
+    const audio = await speak(text);
+    res.set({ "content-type": "audio/mpeg", "cache-control": "private, max-age=3600" }).send(audio);
+  }),
+);
+
+app.get("/api/workspaces/:id/reports/:reportId", (req, res) => {
+  const report = getReport(param(req, "reportId"));
+  if (!report || report.projectId !== param(req, "id")) return res.status(404).json({ error: "This analysis has expired. Run it again." });
+  res.json(report);
+});
 
 app.post(
   "/api/workspaces/:id/approve",
@@ -120,6 +170,12 @@ app.post(
     const w = getWorkspace(id);
     requireActivePlan(w);
     const out = approveChanges(w.project, report, changeIds, w.project.members[0].name);
+    for (const m of out.messages) {
+      const note = report.review?.briefings.find((b) => b.memberId === m.memberId);
+      if (note) m.text = `${m.text}
+
+From the coordinator: ${note.text}`;
+    }
     const ws = updateWorkspace(id, (x) => {
       x.project = out.project;
       x.history.push(

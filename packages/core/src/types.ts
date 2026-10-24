@@ -150,6 +150,26 @@ export interface ImpactReport {
   openQuestions: string[];
   engine: "deterministic" | "llm";
   createdAt: string;
+  /** Second opinion from the Hades coordinator agent on AgenticOrg, filled in after the report returns. */
+  review?: AgentReview;
+}
+
+/** What the AgenticOrg coordinator said about a report. It recommends; the lead still approves in Hades. */
+export interface AgentReview {
+  provider: "agenticorg";
+  status: "pending" | "done" | "failed";
+  runId: string | null;
+  decisionBrief: string;
+  recommendedChangeIds: string[];
+  briefings: { memberId: string; text: string }[];
+  questionsForLead: string[];
+  escalate: boolean;
+  escalationReason: string | null;
+  confidence: number | null;
+  /** True when AgenticOrg's HITL rule fired (low confidence or escalation). */
+  hitl: boolean;
+  error?: string;
+  durationMs?: number;
 }
 
 export type AuditAction =
@@ -162,6 +182,7 @@ export type AuditAction =
   | "member_update"
   | "member_linked"
   | "payment"
+  | "agent_review"
   | "reassessed";
 
 export interface AuditEvent {

@@ -43,6 +43,17 @@ export async function sendTelegram(chatId: string, text: string): Promise<void> 
   await call("sendMessage", { chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true });
 }
 
+/** Sends an MP3 as a Telegram voice note. */
+export async function sendTelegramVoice(chatId: string, audio: Buffer, caption?: string): Promise<void> {
+  const form = new FormData();
+  form.append("chat_id", chatId);
+  if (caption) form.append("caption", caption.slice(0, 1000));
+  form.append("voice", new Blob([new Uint8Array(audio)], { type: "audio/mpeg" }), "hades.mp3");
+  const res = await fetch(api("sendVoice"), { method: "POST", body: form });
+  const json = (await res.json()) as { ok: boolean; description?: string };
+  if (!json.ok) throw new Error(`Telegram sendVoice failed: ${json.description}`);
+}
+
 /** Normalises an update from either the webhook or getUpdates. */
 export function parseUpdate(update: any): TelegramInbound | null {
   const m = update?.message ?? update?.edited_message;

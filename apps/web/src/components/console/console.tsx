@@ -17,6 +17,7 @@ import {
   schedule as runSchedule,
   StaleProposalError,
   TRIAL_DAYS,
+  type AgentReview,
   type AuditEvent,
   type Basis,
   type ImpactReport,
@@ -199,6 +200,22 @@ export function Console() {
 
   const project = state?.project;
   const baseSchedule = useMemo(() => (project ? scheduleProject(project) : null), [project]);
+
+  // The AgenticOrg coordinator answers a few seconds after the engine; pick its review up when it lands.
+  const reviewPending = report?.review?.status === "pending" ? report.id : null;
+  useEffect(() => {
+    if (!ws || !reviewPending) return;
+    let tries = 0;
+    const t = window.setInterval(async () => {
+      tries += 1;
+      const r = await api.report(ws.id, reviewPending).catch(() => null);
+      if (r?.review && r.review.status !== "pending") {
+        setReport((cur) => (cur && cur.id === r.id ? { ...cur, review: r.review } : cur));
+        window.clearInterval(t);
+      } else if (tries > 30) window.clearInterval(t);
+    }, 2500);
+    return () => window.clearInterval(t);
+  }, [ws, reviewPending]);
 
   /* ---------------- Analysis ---------------- */
   const analyze = useCallback(
@@ -610,6 +627,15 @@ export function Console() {
                   <>
                     <Feasibility report={report} chosen={report.changes.filter((c) => decisions[c.id])} project={project} />
 
+                    {report.review || (ws && meta?.voice?.enabled) ? (
+                      <CoordinatorCard
+                        review={report.review}
+                        project={project}
+                        voiceUrl={ws && meta?.voice?.enabled ? api.voiceUrl(ws.id, report.id) : null}
+                        onUsePicks={(ids) => setDecisions(Object.fromEntries(report.changes.map((c) => [c.id, ids.includes(c.id)])))}
+                      />
+                    ) : null}
+
                     <div>
                       <div className="flex items-center justify-between">
                         <span className="label">Proposed edits</span>
@@ -680,6 +706,97 @@ export function Console() {
 }
 
 /* ================================================================== */
+
+/** The AgenticOrg coordinator's second opinion, plus the ElevenLabs read-out of the summary. */
+function CoordinatorCard({
+  review,
+  project,
+  voiceUrl,
+  onUsePicks,
+}: {
+  review?: AgentReview;
+  project: Project;
+  voiceUrl: string | null;
+  onUsePicks: (ids: string[]) => void;
+}) {
+  const name = (id: string) => project.members.find((m) => m.id === id)?.name ?? id;
+  return (
+    <div className="rounded-xl border border-styx/30 bg-surface p-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="display text-[13px] font-bold text-styx-2">Coordinator · AgenticOrg</span>
+        <div className="flex items-center gap-2">
+          {voiceUrl ? <VoiceButton url={voiceUrl} /> : null}
+          {review?.status === "done" && review.confidence != null ? (
+            <span className="font-mono text-[10px] text-muted">{Math.round(review.confidence * 100)}% sure</span>
+          ) : null}
+        </div>
+      </div>
+      {!review ? (
+        <p className="mt-2 text-[12px] text-dim">Listen to the impact summary.</p>
+      ) : review.status === "pending" ? (
+        <p className="mt-2 animate-pulse text-[12.5px] text-dim">Reviewing the plan on AgenticOrg…</p>
+      ) : review.status === "failed" ? (
+        <p className="mt-2 text-[12px] text-dim">The coordinator could not review this one ({review.error}). The engine’s plan above still stands.</p>
+      ) : (
+        <>
+          <p className="mt-2 text-[13px] leading-snug text-text">{review.decisionBrief}</p>
+          {review.hitl ? (
+            <p className="mt-2.5 rounded-lg border border-warn/30 bg-[var(--warn-soft)] px-2.5 py-2 text-[12px] leading-snug text-warn">
+              Needs your sign-off{review.escalationReason ? `: ${review.escalationReason}` : "."}
+            </p>
+          ) : null}
+          {review.questionsForLead.length ? (
+            <ul className="mt-2 space-y-1 text-[12px] text-muted">
+              {review.questionsForLead.map((q) => (
+                <li key={q}>• {q}</li>
+              ))}
+            </ul>
+          ) : null}
+          {review.briefings.length ? (
+            <p className="mt-2 text-[11px] text-dim">Personal notes ready for {review.briefings.map((b) => name(b.memberId)).join(", ")}. They go out with your approval.</p>
+          ) : null}
+          <div className="mt-2.5 flex items-center justify-between gap-2">
+            {review.recommendedChangeIds.length ? (
+              <button onClick={() => onUsePicks(review.recommendedChangeIds)} className="rounded-lg border border-line-2 px-2.5 py-1.5 text-[11.5px] font-semibold text-text transition hover:border-styx">
+                Use its {review.recommendedChangeIds.length} picks
+              </button>
+            ) : (
+              <span />
+            )}
+            {review.runId ? <span className="font-mono text-[10px] text-dim">run {review.runId.slice(0, 8)}</span> : null}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function VoiceButton({ url }: { url: string }) {
+  const [state, setState] = useState<"idle" | "loading" | "playing">("idle");
+  const audio = useRef<HTMLAudioElement | null>(null);
+  useEffect(() => () => audio.current?.pause(), []);
+  const toggle = () => {
+    if (state === "playing") {
+      audio.current?.pause();
+      setState("idle");
+      return;
+    }
+    if (!audio.current || audio.current.src !== url) {
+      audio.current?.pause();
+      audio.current = new Audio(url);
+      audio.current.onended = () => setState("idle");
+      audio.current.onerror = () => setState("idle");
+      audio.current.onplaying = () => setState("playing");
+    }
+    setState("loading");
+    audio.current.play().catch(() => setState("idle"));
+  };
+  return (
+    <button onClick={toggle} className="rounded-md border border-line-2 px-2 py-0.5 font-mono text-[10px] text-muted transition hover:text-text">
+      {state === "playing" ? "■ stop" : state === "loading" ? "loading…" : "▶ listen"}
+    </button>
+  );
+}
 
 function Pill({ label, value, tone }: { label: string; value: string; tone?: "ok" | "warn" | "ember" }) {
   const c = tone === "ember" ? "text-ember" : tone === "warn" ? "text-warn" : tone === "ok" ? "text-ok" : "text-text";

@@ -56,6 +56,16 @@ services:
         sync: false
       - key: PINELABS_CLIENT_SECRET
         sync: false
+      # AgenticOrg coordinator agent (hackathon instance)
+      - key: AGENTICORG_BASE_URL
+        value: https://agenticorg.hackathon.pinelabs.com
+      - key: AGENTICORG_AGENT_ID
+        value: ab2dfa5b-9973-4f3c-8691-d07c899dd2e2
+      - key: AGENTICORG_API_KEY
+        sync: false
+      # ElevenLabs voice summaries and Telegram voice notes
+      - key: ELEVENLABS_API_KEY
+        sync: false
 
   - type: web
     name: hades-web

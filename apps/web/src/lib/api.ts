@@ -11,6 +11,8 @@ export interface Meta {
   google: { enabled: boolean };
   telegram: { enabled: boolean; bot: string | null };
   whatsapp: { enabled: boolean; number: string | null };
+  agenticorg?: { enabled: boolean };
+  voice?: { enabled: boolean };
 }
 
 export interface Me {
@@ -75,6 +77,8 @@ export const api = {
     call<ServerWorkspace | { changed: false; updatedAt: string }>(`/api/workspaces/${id}${since ? `?since=${encodeURIComponent(since)}` : ""}`),
   claim: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/claim`),
   analyze: (id: string, request: string) => post<ImpactReport>(`/api/workspaces/${id}/analyze`, { request }),
+  report: (id: string, reportId: string) => call<ImpactReport>(`/api/workspaces/${id}/reports/${reportId}`),
+  voiceUrl: (id: string, reportId: string) => `${API_URL}/api/workspaces/${id}/reports/${reportId}/voice`,
   approve: (id: string, reportId: string, changeIds: string[]) => post<ServerWorkspace>(`/api/workspaces/${id}/approve`, { reportId, changeIds }),
   reject: (id: string, reportId: string) => post<ServerWorkspace>(`/api/workspaces/${id}/reject`, { reportId }),
   memberUpdate: (id: string, body: { memberId: string; taskId: string; estimateDays?: number; note: string }) =>

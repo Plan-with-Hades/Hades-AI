@@ -8,8 +8,9 @@ import {
   type Reassessment,
   type WorkspaceState,
 } from "@hades/core";
-import { sendTelegram } from "./channels/telegram";
+import { sendTelegram, sendTelegramVoice } from "./channels/telegram";
 import { sendWhatsApp } from "./channels/whatsapp";
+import { speak, voiceEnabled } from "./voice/elevenlabs";
 import { findLink, newId, resolveJoinCode, updateWorkspace } from "./store";
 
 type ChatChannel = Exclude<Channel, "web">;
@@ -35,6 +36,11 @@ export async function deliver(workspaceId: string, messages: MemberMessage[], ws
     for (const l of links) {
       try {
         await send(l.channel, l.address, m.text);
+        if (l.channel === "telegram" && voiceEnabled()) {
+          await speak(m.text)
+            .then((audio) => sendTelegramVoice(l.address, audio))
+            .catch((e) => console.error("Voice note failed:", (e as Error).message));
+        }
         updateWorkspace(workspaceId, (w) => {
           const stored = w.messages.find((x) => x.id === m.id);
           if (stored) stored.channel = l.channel;

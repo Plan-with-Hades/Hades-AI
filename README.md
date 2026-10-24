@@ -59,6 +59,8 @@ All secrets go in `.env` (local) or the Render dashboard. See `.env.example` for
 | **Google Calendar** | Pushes every open task and the event day into the organiser's calendar; re-sync updates the same events | Enable the Google Calendar API in the same project. Asked for only when the user clicks "Google Calendar" |
 | **Pine Labs** | Hosted checkout for Pro (UPI, cards, netbanking). Redirect signature verified (HMAC-SHA256) | Set `PINELABS_CLIENT_ID`, `PINELABS_CLIENT_SECRET` (UAT). Without them, a clearly labelled simulated checkout runs |
 | **Telegram** | Member agents brief teammates and read their replies | Create a bot with @BotFather, set `TELEGRAM_BOT_TOKEN`. Locally it polls; on Render it sets a webhook |
+| **AgenticOrg** | The Hades coordinator agent reviews every analysis: decision brief, which edits it would approve, personal notes for each teammate, and a HITL flag (confidence < 0.9 or escalation). Run ids land in the audit log | Set `AGENTICORG_API_KEY` (agent id and hackathon base URL are preset) |
+| **ElevenLabs** | "Listen" reads the impact summary aloud; Telegram briefings also arrive as voice notes | Set `ELEVENLABS_API_KEY` (optional `ELEVENLABS_VOICE_ID`) |
 | **WhatsApp (Twilio)** | Same member agents on WhatsApp | Twilio sandbox; set `TWILIO_*` and point the sandbox webhook to `<API>/api/channels/whatsapp/twilio` |
 
 Teammates link a chat once with their join code (shown in **Connect team**): Telegram deep link, or `hades <code>` on WhatsApp. Then they reply in plain words: "need 2 more days", "E5 done", "blocked on the caterer".
