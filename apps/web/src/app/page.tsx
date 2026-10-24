@@ -32,9 +32,9 @@ const AGENTS = [
 
 const CHANNELS = [
   { name: "Web console", d: "The graph, the impact report and the approve button.", tag: "Live" },
-  { name: "WhatsApp & Telegram", d: "Teammates report blockers and get briefed where they already are.", tag: "Building" },
+  { name: "WhatsApp & Telegram", d: "Teammates report blockers and get briefed where they already are.", tag: "Live" },
   { name: "Voice check-ins", d: "Hades calls a teammate to confirm an estimate, with Vobiz telephony and an ElevenLabs voice.", tag: "Building" },
-  { name: "Pine Labs checkout", d: "Upgrade a team to Pro in two taps with UPI.", tag: "Building" },
+  { name: "Pine Labs checkout", d: "Start with a 3-day free trial, then upgrade a team to Pro in two taps with UPI.", tag: "Live" },
 ];
 
 export default function Home() {
@@ -241,28 +241,30 @@ export default function Home() {
       <section id="pricing" className="scroll-mt-24 px-5 py-24 sm:px-8">
         <div className="mx-auto max-w-6xl">
           <span className="label">Pricing</span>
-          <h2 className="display mt-5 text-[clamp(28px,3.6vw,46px)] font-bold leading-[1.05]">Free for small teams.</h2>
-          <div className="mt-12 grid gap-4 md:grid-cols-2">
+          <h2 className="display mt-5 text-[clamp(28px,3.6vw,46px)] font-bold leading-[1.05]">Try everything free for 3 days.</h2>
+          <div className="mt-12 grid gap-4 md:grid-cols-[1fr_1.2fr]">
             <div className="rounded-2xl border border-line bg-bg-2 p-8">
-              <h3 className="display text-lg font-bold">Free</h3>
-              <p className="mt-2 font-mono text-3xl">₹0</p>
+              <h3 className="display text-lg font-bold">Free trial</h3>
+              <p className="mt-2 font-mono text-3xl">
+                ₹0<span className="text-base text-muted"> · 3 days</span>
+              </p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
-                <li>1 project, up to 5 members</li>
-                <li>Change analysis with all agents</li>
-                <li>Web console and member briefings</li>
+                <li>Every feature, no card needed</li>
+                <li>Sign in with Google</li>
+                <li>Your plan stays readable after the trial</li>
               </ul>
             </div>
             <div className="relative rounded-2xl border border-styx/40 bg-bg-2 p-8 shadow-[0_0_60px_-20px_var(--styx)]">
-              <h3 className="display text-lg font-bold">Pro</h3>
+              <h3 className="display text-lg font-bold">Hades Pro</h3>
               <p className="mt-2 font-mono text-3xl">
-                ₹99<span className="text-base text-muted"> / team / month</span>
+                ₹599<span className="text-base text-muted"> / team / month</span>
               </p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
-                <li>Unlimited projects and members</li>
-                <li>WhatsApp and voice check-ins</li>
-                <li>Change history and exportable reports</li>
+                <li>Unlimited change analyses and approvals</li>
+                <li>Member agents on Telegram and WhatsApp</li>
+                <li>Google Calendar sync and full change history</li>
               </ul>
-              <p className="label mt-6">Pay with UPI via Pine Labs</p>
+              <p className="label mt-6">Pay with UPI, cards or netbanking via Pine Labs</p>
             </div>
           </div>
         </div>

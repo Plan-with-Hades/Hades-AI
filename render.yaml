@@ -1,5 +1,6 @@
-# Render Blueprint: New → Blueprint → pick this repo.
-# Creates the API and the web app. Add secrets in the Render dashboard after the first deploy.
+# Render Blueprint: New → Blueprint → pick this repo (branch with this file).
+# Creates the API (with a small persistent disk) and the web app.
+# After the first deploy, fill the "sync: false" secrets in each service's Environment tab.
 services:
   - type: web
     name: hades-api
@@ -9,20 +10,51 @@ services:
     buildCommand: npm ci && npm run build:api
     startCommand: npm run start:api
     healthCheckPath: /health
+    disk:
+      name: hades-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
       - key: CORS_ORIGINS
         value: "*"
-      - key: ANTHROPIC_API_KEY
+      - key: WEB_URL
+        fromService:
+          type: web
+          name: hades-web
+          property: host
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: TELEGRAM_WEBHOOK_SECRET
+        generateValue: true
+      # Google OAuth 2.0 client (Google Cloud Console → APIs & Services → Credentials)
+      - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      # Telegram bot from @BotFather
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      # Twilio WhatsApp sandbox
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false
+      # Pine Labs Online (UAT during the hackathon)
+      - key: PINELABS_ENV
+        value: uat
       - key: PINELABS_CLIENT_ID
         sync: false
       - key: PINELABS_CLIENT_SECRET
-        sync: false
-      - key: PINELABS_MERCHANT_ID
-        sync: false
-      - key: AGENTICORG_WEBHOOK_SECRET
         sync: false
 
   - type: web
@@ -39,4 +71,4 @@ services:
         fromService:
           type: web
           name: hades-api
-          envVarKey: RENDER_EXTERNAL_URL
+          property: host

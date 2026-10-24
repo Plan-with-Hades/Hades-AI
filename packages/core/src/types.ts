@@ -160,6 +160,8 @@ export type AuditAction =
   | "change_rejected"
   | "member_notified"
   | "member_update"
+  | "member_linked"
+  | "payment"
   | "reassessed";
 
 export interface AuditEvent {
@@ -172,6 +174,8 @@ export interface AuditEvent {
   meta?: Record<string, unknown>;
 }
 
+export type Channel = "web" | "telegram" | "whatsapp";
+
 export interface MemberMessage {
   id: string;
   memberId: string;
@@ -179,4 +183,72 @@ export interface MemberMessage {
   from: "agent" | "member";
   text: string;
   taskIds: string[];
+  /** Where the message was delivered or came from. */
+  channel?: Channel;
+}
+
+/** A teammate's chat identity, linked by sending their join code to the bot. */
+export interface MemberLink {
+  memberId: string;
+  channel: Exclude<Channel, "web">;
+  /** Telegram chat id or WhatsApp number (E.164). */
+  address: string;
+  displayName?: string;
+  linkedAt: string;
+}
+
+export interface PaymentRecord {
+  id: string;
+  provider: "pinelabs" | "simulated";
+  orderId: string;
+  amountPaise: number;
+  status: "created" | "authorized" | "captured" | "failed";
+  checkoutUrl: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Everything a team's console needs, served by the API and polled for changes. */
+export interface WorkspaceState {
+  id: string;
+  project: Project;
+  history: AuditEvent[];
+  messages: MemberMessage[];
+  reassessment: {
+    headline: string;
+    feasible: boolean;
+    finishDate: string;
+    suggestions: { id: string; summary: string }[];
+  } | null;
+  links: MemberLink[];
+  /** Short code per member, e.g. "fx7k-rohan", used to link a chat to a member. */
+  joinCodes: Record<string, string>;
+  /** Stored plan. A trial past `trialEndsAt` is treated as expired (see effectivePlan). */
+  plan: "trial" | "pro";
+  trialEndsAt: string;
+  payments: PaymentRecord[];
+  /** Google account that owns this workspace (null for a guest demo). */
+  ownerId: string | null;
+  ownerName?: string;
+  /** Google Calendar event ids per task, once synced. */
+  calendar?: { syncedAt: string; events: Record<string, string> };
+  updatedAt: string;
+}
+
+export type EffectivePlan = "trial" | "pro" | "expired";
+
+export const TRIAL_DAYS = 3;
+export const PRO_PRICE_INR = 599;
+
+export function effectivePlan(w: Pick<WorkspaceState, "plan" | "trialEndsAt">, now = new Date()): EffectivePlan {
+  if (w.plan === "pro") return "pro";
+  return new Date(w.trialEndsAt).getTime() > now.getTime() ? "trial" : "expired";
+}
+
+export interface PublicUser {
+  id: string;
+  email: string;
+  name: string;
+  picture?: string;
+  calendarConnected: boolean;
 }

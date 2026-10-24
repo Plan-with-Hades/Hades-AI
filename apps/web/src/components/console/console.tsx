@@ -11,33 +11,45 @@ import {
   DEMO_REPLIES,
   formatShort,
   GOLDEN_REQUEST,
+  PRO_PRICE_INR,
   SAMPLE_REQUESTS,
   scheduleProject,
   schedule as runSchedule,
   StaleProposalError,
+  TRIAL_DAYS,
   type AuditEvent,
   type Basis,
   type ImpactReport,
   type MemberMessage,
   type Project,
   type ProposedChange,
+  type PublicUser,
   type Reassessment,
+  type WorkspaceState,
 } from "@hades/core";
 import { Logo } from "@/components/logo";
+import { api, API_URL, ApiError, getRememberedWorkspace, getToken, rememberWorkspace, type Meta, type ServerWorkspace } from "@/lib/api";
 import { TaskGraph, type Highlight } from "./task-graph";
 
 type Phase = "idle" | "analyzing" | "review";
+type StoredReassessment = NonNullable<WorkspaceState["reassessment"]>;
 
 interface State {
   project: Project;
   history: AuditEvent[];
   messages: MemberMessage[];
-  reassessment: Reassessment | null;
+  reassessment: StoredReassessment | null;
 }
 
-const STORAGE_KEY = "hades:demo:v2";
+const STORAGE_KEY = "hades:demo:v3";
 const uid = () => Math.random().toString(36).slice(2, 9);
 const lead = (p: Project) => p.members[0]?.name ?? "Manager";
+const toStored = (r: Reassessment): StoredReassessment => ({
+  headline: r.headline,
+  feasible: r.schedule.feasible,
+  finishDate: r.schedule.finishDate,
+  suggestions: r.suggestions.map((s) => ({ id: s.id, summary: s.summary })),
+});
 
 function freshState(): State {
   const project = createDemoProject();
@@ -83,28 +95,106 @@ export function Console() {
   const [toast, setToast] = useState<string | null>(null);
   const [inboxMember, setInboxMember] = useState<string | null>(null);
   const [upgradeOpen, setUpgradeOpen] = useState(false);
+  const [upgradeReason, setUpgradeReason] = useState<string | null>(null);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  // Online mode: the API owns the workspace so chats, payments and teammates share one plan.
+  const [ws, setWs] = useState<ServerWorkspace | null>(null);
+  const [me, setMe] = useState<PublicUser | null>(null);
+  const [meta, setMeta] = useState<Meta | null>(null);
   const timers = useRef<number[]>([]);
+  const online = ws !== null;
 
-  // Load from this browser, or start the demo project.
-  useEffect(() => {
-    let loaded: State | null = null;
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) loaded = JSON.parse(raw) as State;
-    } catch {}
-    setState(loaded ?? freshState());
+  const flash = useCallback((msg: string) => {
+    setToast(msg);
+    timers.current.push(window.setTimeout(() => setToast(null), 4200));
   }, []);
+
+  const applyServer = useCallback((w: ServerWorkspace) => {
+    setWs(w);
+    setState({ project: w.project, history: w.history, messages: w.messages, reassessment: w.reassessment });
+  }, []);
+
+  // Start: connect to the API if one is configured, otherwise run the demo in this browser.
   useEffect(() => {
-    if (!state) return;
+    let cancelled = false;
+    (async () => {
+      if (API_URL) {
+        try {
+          const params = new URLSearchParams(window.location.search);
+          const [m, mine] = await Promise.all([api.meta(), getToken() ? api.me().catch(() => null) : Promise.resolve(null)]);
+          const wanted = params.get("w") ?? getRememberedWorkspace();
+          let w: ServerWorkspace | null = null;
+          if (wanted) {
+            const got = await api.workspace(wanted).catch(() => null);
+            if (got && "project" in got) w = got;
+          }
+          if (!w && mine?.workspaces[0]) {
+            const got = await api.workspace(mine.workspaces[0].id).catch(() => null);
+            if (got && "project" in got) w = got;
+          }
+          w ??= await api.createWorkspace();
+          if (mine && !w.ownerId) w = await api.claim(w.id).catch(() => w!);
+          if (cancelled) return;
+          setMeta(m);
+          setMe(mine?.user ?? null);
+          applyServer(w);
+          rememberWorkspace(w.id);
+          const paid = params.get("paid");
+          if (paid === "1") flash("Payment received. Your team is on Hades Pro.");
+          else if (paid === "0") flash("The payment didn't go through. You can try again.");
+          else if (paid === "unverified") flash("We couldn't verify that payment yet. It will update when Pine Labs confirms.");
+          params.delete("paid");
+          params.set("w", w.id);
+          window.history.replaceState(null, "", `${window.location.pathname}?${params}`);
+          return;
+        } catch (e) {
+          console.warn("Hades API unavailable, running the demo locally.", e);
+        }
+      }
+      let loaded: State | null = null;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) loaded = JSON.parse(raw) as State;
+      } catch {}
+      if (!cancelled) setState(loaded ?? freshState());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [applyServer, flash]);
+
+  // Offline mode keeps the demo in this browser.
+  useEffect(() => {
+    if (!state || online) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {}
-  }, [state]);
+  }, [state, online]);
+
+  // Online mode: pick up teammates' chat replies, payments and approvals made elsewhere.
+  const wsId = ws?.id;
+  const wsUpdated = ws?.updatedAt;
+  useEffect(() => {
+    if (!wsId) return;
+    const t = window.setInterval(async () => {
+      try {
+        const got = await api.workspace(wsId, wsUpdated);
+        if ("project" in got) applyServer(got);
+      } catch {}
+    }, 3000);
+    return () => window.clearInterval(t);
+  }, [wsId, wsUpdated, applyServer]);
+
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-  const flash = (msg: string) => {
-    setToast(msg);
-    timers.current.push(window.setTimeout(() => setToast(null), 3200));
+  const fail = (e: unknown) => {
+    if (e instanceof ApiError && e.status === 402) {
+      setUpgradeReason(e.message);
+      setUpgradeOpen(true);
+      return;
+    }
+    flash(e instanceof Error ? e.message : "Something went wrong");
   };
 
   const project = state?.project;
@@ -112,10 +202,16 @@ export function Console() {
 
   /* ---------------- Analysis ---------------- */
   const analyze = useCallback(
-    (text: string) => {
+    async (text: string) => {
       if (!state || !text.trim()) return;
       timers.current.forEach(clearTimeout);
-      const r = analyzeChange(state.project, text);
+      let r: ImpactReport;
+      try {
+        r = ws ? await api.analyze(ws.id, text) : analyzeChange(state.project, text);
+      } catch (e) {
+        fail(e);
+        return;
+      }
       setReport(r);
       setDecisions(Object.fromEntries(r.changes.map((c) => [c.id, c.recommended])));
       setPhase("analyzing");
@@ -123,23 +219,45 @@ export function Console() {
       // The agents run in milliseconds; reveal them one by one so people can follow the reasoning.
       [1, 2, 3, 4].forEach((s, i) => timers.current.push(window.setTimeout(() => setStep(s), 650 * (i + 1))));
       timers.current.push(window.setTimeout(() => setPhase("review"), 650 * 4 + 150));
-      setState((st) =>
-        st && {
-          ...st,
-          history: [
-            ...st.history,
-            { id: uid(), at: new Date().toISOString(), actor: lead(st.project), action: "change_requested", summary: text, projectVersion: st.project.version },
-          ],
-        },
-      );
+      if (!ws) {
+        setState((st) =>
+          st && {
+            ...st,
+            history: [
+              ...st.history,
+              { id: uid(), at: new Date().toISOString(), actor: lead(st.project), action: "change_requested", summary: text, projectVersion: st.project.version },
+            ],
+          },
+        );
+      }
     },
-    [state],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state, ws],
   );
 
-  const approve = () => {
+  const approve = async () => {
     if (!state || !report) return;
+    const ids = Object.entries(decisions).filter(([, v]) => v).map(([k]) => k);
+    if (ws) {
+      setBusy(true);
+      try {
+        const before = state.messages.length;
+        const w = await api.approve(ws.id, report.id, ids);
+        applyServer(w);
+        const briefed = w.messages.slice(before).filter((m) => m.from === "agent");
+        setReport(null);
+        setPhase("idle");
+        setRequest("");
+        flash(`Approved ${ids.length} change${ids.length === 1 ? "" : "s"}. ${briefed.length} teammates briefed${w.links.length ? " on their chats" : ""}.`);
+        if (briefed[0]) setInboxMember(briefed[0].memberId);
+      } catch (e) {
+        fail(e);
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
-      const ids = Object.entries(decisions).filter(([, v]) => v).map(([k]) => k);
       const res = approveChanges(state.project, report, ids, lead(state.project));
       setState({
         ...state,
@@ -163,19 +281,37 @@ export function Console() {
     }
   };
 
-  const reject = () => {
+  const reject = async () => {
     if (!state || !report) return;
-    setState({
-      ...state,
-      history: [...state.history, { id: uid(), at: new Date().toISOString(), actor: lead(state.project), action: "change_rejected", summary: `Rejected: ${report.request}`, projectVersion: state.project.version }],
-    });
+    if (ws) {
+      try {
+        applyServer(await api.reject(ws.id, report.id));
+      } catch (e) {
+        fail(e);
+      }
+    } else {
+      setState({
+        ...state,
+        history: [...state.history, { id: uid(), at: new Date().toISOString(), actor: lead(state.project), action: "change_rejected", summary: `Rejected: ${report.request}`, projectVersion: state.project.version }],
+      });
+    }
     setReport(null);
     setPhase("idle");
     flash("Rejected. The plan is unchanged.");
   };
 
-  const memberReply = (memberId: string, taskId: string, estimate: number | undefined, note: string) => {
+  const memberReply = async (memberId: string, taskId: string, estimate: number | undefined, note: string) => {
     if (!state) return;
+    if (ws) {
+      try {
+        const w = await api.memberUpdate(ws.id, { memberId, taskId, estimateDays: estimate, note });
+        applyServer(w);
+        if (w.reassessment) flash(w.reassessment.headline);
+      } catch (e) {
+        fail(e);
+      }
+      return;
+    }
     try {
       const res = applyMemberUpdate(state.project, { memberId, taskId, estimateDays: estimate, note });
       setState({
@@ -187,7 +323,7 @@ export function Console() {
           res.message,
           { id: uid(), memberId, at: new Date().toISOString(), from: "agent", text: `Thanks. I've updated ${taskId} and told ${lead(state.project)}: ${res.reassessment.headline}`, taskIds: [taskId] },
         ],
-        reassessment: res.reassessment,
+        reassessment: toStored(res.reassessment),
       });
       flash(res.reassessment.headline);
     } catch (e) {
@@ -195,14 +331,64 @@ export function Console() {
     }
   };
 
-  const resetDemo = () => {
+  const resetDemo = async () => {
     timers.current.forEach(clearTimeout);
-    setState(freshState());
+    if (ws) {
+      try {
+        applyServer(await api.reset(ws.id));
+      } catch (e) {
+        fail(e);
+        return;
+      }
+    } else {
+      setState(freshState());
+    }
     setReport(null);
     setPhase("idle");
     setRequest(GOLDEN_REQUEST);
     setInboxMember(null);
-    flash("Demo project reset.");
+    flash("Project reset to the starting plan.");
+  };
+
+  const startCheckout = async () => {
+    if (!ws) {
+      flash("Checkout needs the Hades API. Start it with npm run dev:api.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const { checkoutUrl } = await api.checkout(ws.id);
+      window.location.href = checkoutUrl;
+    } catch (e) {
+      setBusy(false);
+      fail(e);
+    }
+  };
+
+  const syncCalendar = async () => {
+    if (!ws) {
+      flash("Google Calendar sync needs the Hades API.");
+      return;
+    }
+    if (!meta?.google.enabled) {
+      flash("Google sign-in isn't configured on the server yet.");
+      return;
+    }
+    if (!me || !me.calendarConnected) {
+      window.location.href = api.signInUrl({ workspaceId: ws.id, calendar: true });
+      return;
+    }
+    setBusy(true);
+    try {
+      const out = await api.syncCalendar(ws.id);
+      applyServer(out.workspace);
+      flash(`Synced to Google Calendar: ${out.created} new, ${out.updated} updated.`);
+    } catch (e) {
+      if (e instanceof ApiError && e.body?.connect) window.location.href = api.signInUrl({ workspaceId: ws.id, calendar: true });
+      else fail(e);
+    } finally {
+      setBusy(false);
+    }
   };
 
   /* ---------------- Derived view ---------------- */
@@ -264,12 +450,29 @@ export function Console() {
               tone={baseSchedule.bufferDays < 0 ? "ember" : baseSchedule.bufferDays <= 1 ? "warn" : "ok"}
             />
             <Pill label="Done" value={`${pct}%`} />
-            <button onClick={resetDemo} className="rounded-full border border-line px-3 py-1.5 text-xs text-muted transition hover:border-line-2 hover:text-text">
-              Reset demo
-            </button>
-            <button onClick={() => setUpgradeOpen(true)} className="rounded-full bg-text px-3.5 py-1.5 text-xs font-semibold text-bg transition hover:bg-styx-2">
-              Upgrade · ₹99
-            </button>
+            <PlanBadge ws={ws} onUpgrade={() => setUpgradeOpen(true)} />
+            <HeaderButton onClick={() => setConnectOpen(true)}>Connect team</HeaderButton>
+            <HeaderButton onClick={syncCalendar} disabled={busy}>
+              {me?.calendarConnected ? "Sync calendar" : "Google Calendar"}
+            </HeaderButton>
+            <HeaderButton onClick={resetDemo}>Reset</HeaderButton>
+            {online && meta?.google.enabled ? (
+              me ? (
+                <span className="flex items-center gap-2 rounded-full border border-line py-1 pl-1 pr-3 text-xs" title={me.email}>
+                  {me.picture ? <img src={me.picture} alt="" className="h-6 w-6 rounded-full" referrerPolicy="no-referrer" /> : null}
+                  {me.name.split(" ")[0]}
+                </span>
+              ) : (
+                <a href={api.signInUrl({ workspaceId: ws?.id })} className="rounded-full border border-line-2 px-3.5 py-1.5 text-xs font-semibold transition hover:border-styx hover:text-styx-2">
+                  Sign in with Google
+                </a>
+              )
+            ) : null}
+            {ws?.effectivePlan !== "pro" ? (
+              <button onClick={() => setUpgradeOpen(true)} className="rounded-full bg-text px-3.5 py-1.5 text-xs font-semibold text-bg transition hover:bg-styx-2">
+                Upgrade · ₹{PRO_PRICE_INR}
+              </button>
+            ) : null}
           </div>
         </div>
       </header>
@@ -459,7 +662,19 @@ export function Console() {
           {toast}
         </div>
       ) : null}
-      {upgradeOpen ? <UpgradeModal onClose={() => setUpgradeOpen(false)} /> : null}
+      {upgradeOpen ? (
+        <UpgradeModal
+          reason={upgradeReason}
+          mode={meta?.payments.mode ?? null}
+          busy={busy}
+          onPay={startCheckout}
+          onClose={() => {
+            setUpgradeOpen(false);
+            setUpgradeReason(null);
+          }}
+        />
+      ) : null}
+      {connectOpen ? <ConnectModal ws={ws} meta={meta} project={project} onClose={() => setConnectOpen(false)} /> : null}
     </div>
   );
 }
@@ -734,7 +949,7 @@ function IdlePanel({ state }: { state: State }) {
   return (
     <div className="space-y-5 p-4 sm:p-5">
       {state.reassessment ? (
-        <div className={`rounded-xl border p-3.5 ${state.reassessment.schedule.feasible ? "border-ok/30 bg-[var(--ok-soft)]" : "border-ember/40 bg-[var(--ember-soft)]"}`}>
+        <div className={`rounded-xl border p-3.5 ${state.reassessment.feasible ? "border-ok/30 bg-[var(--ok-soft)]" : "border-ember/40 bg-[var(--ember-soft)]"}`}>
           <span className="label">Timeline agent · reassessed</span>
           <p className="mt-1.5 text-sm leading-snug">{state.reassessment.headline}</p>
           {state.reassessment.suggestions.map((s) => (
@@ -767,28 +982,167 @@ function IdlePanel({ state }: { state: State }) {
   );
 }
 
-function UpgradeModal({ onClose }: { onClose: () => void }) {
+function HeaderButton({ children, onClick, disabled }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="rounded-full border border-line px-3 py-1.5 text-xs text-muted transition hover:border-line-2 hover:text-text disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function PlanBadge({ ws, onUpgrade }: { ws: ServerWorkspace | null; onUpgrade: () => void }) {
+  if (!ws) return <Pill label="Plan" value="Demo" />;
+  if (ws.effectivePlan === "pro") return <Pill label="Plan" value="Pro" tone="ok" />;
+  if (ws.effectivePlan === "expired")
+    return (
+      <button onClick={onUpgrade} className="rounded-full border border-ember/50 bg-[var(--ember-soft)] px-3 py-1.5 text-xs text-ember">
+        Trial ended
+      </button>
+    );
+  const ms = new Date(ws.trialEndsAt).getTime() - Date.now();
+  const days = Math.floor(ms / 864e5);
+  const hours = Math.max(0, Math.floor((ms % 864e5) / 36e5));
+  return <Pill label="Free trial" value={days > 0 ? `${days}d ${hours}h left` : `${hours}h left`} tone={days < 1 ? "warn" : undefined} />;
+}
+
+function UpgradeModal({
+  reason,
+  mode,
+  busy,
+  onPay,
+  onClose,
+}: {
+  reason: string | null;
+  mode: Meta["payments"]["mode"] | null;
+  busy: boolean;
+  onPay: () => void;
+  onClose: () => void;
+}) {
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-line-2 bg-surface p-6" onClick={(e) => e.stopPropagation()}>
         <span className="label">Hades Pro</span>
-        <h2 className="display mt-2 text-2xl font-bold">₹99 / team / month</h2>
+        <h2 className="display mt-2 text-2xl font-bold">₹{PRO_PRICE_INR} / team / month</h2>
+        {reason ? <p className="mt-3 rounded-lg border border-ember/40 bg-[var(--ember-soft)] p-3 text-[13px] leading-snug text-text">{reason}</p> : null}
         <ul className="mt-4 space-y-1.5 text-sm text-muted">
-          <li>Unlimited projects and teammates</li>
-          <li>WhatsApp and voice check-ins</li>
-          <li>Full change history and exports</li>
+          <li>Unlimited change analyses and approvals</li>
+          <li>Member agents on Telegram and WhatsApp</li>
+          <li>Google Calendar sync and full change history</li>
         </ul>
         <p className="mt-5 rounded-lg border border-line bg-bg-2 p-3 text-[12.5px] leading-snug text-muted">
-          Checkout runs on Pine Labs. Test-mode payments are being wired up now.
+          {mode === "simulated"
+            ? "Pine Labs test keys aren't configured yet, so checkout runs in a clearly labelled simulated mode. No money moves."
+            : mode === "test"
+              ? "Pays with Pine Labs in test mode. Use a Pine Labs test UPI ID or card."
+              : mode === "live"
+                ? "Secure checkout by Pine Labs: UPI, cards, netbanking and wallets."
+                : "Checkout needs the Hades API to be running."}
         </p>
         <div className="mt-5 flex gap-2">
           <button onClick={onClose} className="flex-1 rounded-xl border border-line-2 px-4 py-3 text-sm text-muted">
             Not now
           </button>
-          <button disabled className="flex-[2] rounded-xl bg-text px-4 py-3 text-sm font-semibold text-bg opacity-50">
-            Pay with Pine Labs
+          <button onClick={onPay} disabled={busy || !mode} className="flex-[2] rounded-xl bg-text px-4 py-3 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-50">
+            {busy ? "Opening Pine Labs…" : "Pay with Pine Labs"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ConnectModal({ ws, meta, project, onClose }: { ws: ServerWorkspace | null; meta: Meta | null; project: Project; onClose: () => void }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const copy = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(text);
+      window.setTimeout(() => setCopied(null), 1500);
+    } catch {}
+  };
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line-2 bg-surface p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <span className="label">Member agents</span>
+            <h2 className="display mt-2 text-xl font-bold">Connect your team</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted">
+              Each teammate links their chat once. After that, Hades briefs them when a change touches their work, and they reply in plain
+              words (&quot;need 2 more days&quot;, &quot;E5 done&quot;) to update the plan.
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted hover:text-text" aria-label="Close">
+            ✕
+          </button>
+        </div>
+        {!ws ? (
+          <p className="mt-5 rounded-lg border border-warn/30 bg-[var(--warn-soft)] p-3 text-sm">Start the Hades API to connect chats. The web inboxes below the graph work without it.</p>
+        ) : (
+          <>
+            <div className="mt-5 grid gap-2 text-[12.5px] sm:grid-cols-2">
+              <div className="rounded-lg border border-line bg-bg-2 p-3">
+                <span className="label">Telegram</span>
+                <p className="mt-1 text-muted">
+                  {meta?.telegram.bot ? (
+                    <>Tap the link for each teammate. It opens @{meta.telegram.bot} and links them.</>
+                  ) : (
+                    "Not configured on the server yet (TELEGRAM_BOT_TOKEN)."
+                  )}
+                </p>
+              </div>
+              <div className="rounded-lg border border-line bg-bg-2 p-3">
+                <span className="label">WhatsApp</span>
+                <p className="mt-1 text-muted">
+                  {meta?.whatsapp.number ? (
+                    <>
+                      Join the sandbox once, then send <span className="font-mono text-text">hades &lt;code&gt;</span> to {meta.whatsapp.number}.
+                    </>
+                  ) : (
+                    "Not configured on the server yet (Twilio)."
+                  )}
+                </p>
+              </div>
+            </div>
+            <ul className="mt-4 divide-y divide-line rounded-xl border border-line">
+              {project.members.map((m) => {
+                const code = ws.joinCodes[m.id];
+                const links = ws.links.filter((l) => l.memberId === m.id);
+                return (
+                  <li key={m.id} className="flex flex-wrap items-center gap-3 p-3">
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full font-mono text-[11px] text-bg" style={{ background: `hsl(${m.hue} 70% 68%)` }}>
+                      {m.initials}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold">{m.name}</span>
+                      <span className="block text-[11px] text-muted">
+                        {links.length ? `Linked: ${links.map((l) => (l.channel === "telegram" ? "Telegram" : "WhatsApp")).join(", ")}` : m.role}
+                      </span>
+                    </span>
+                    <button onClick={() => copy(code)} className="rounded-lg border border-line-2 px-2.5 py-1.5 font-mono text-[11px] text-text hover:border-styx">
+                      {copied === code ? "Copied" : code}
+                    </button>
+                    {meta?.telegram.bot ? (
+                      <a
+                        href={`https://t.me/${meta.telegram.bot}?start=${code}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-lg bg-styx px-2.5 py-1.5 text-[11px] font-semibold text-bg hover:bg-styx-2"
+                      >
+                        Telegram link
+                      </a>
+                    ) : null}
+                    {links.length ? <span className="h-2 w-2 rounded-full bg-ok" title="Linked" /> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
       </div>
     </div>
   );

@@ -33,3 +33,7 @@ Thumbs.db
 .vercel
 .replit
 replit.nix
+
+# local API data
+data/
+apps/api/data/
