@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import pg from "pg";
-import { blankProject, createDemoProject, TRIAL_DAYS, type ImpactReport, type WorkspaceState } from "@hades/core";
+import { blankProject, createDemoProject, repairMisreadMembers, TRIAL_DAYS, type ImpactReport, type WorkspaceState } from "@hades/core";
 
 /**
  * Workspaces live in memory and are flushed after every change, so a restart keeps teams' projects.
@@ -35,16 +35,26 @@ const users = new Map<string, StoredUser>();
 /** Analyses are kept until approved or replaced; they are not persisted. */
 const reports = new Map<string, ImpactReport>();
 
+let repaired = false;
 function hydrate(data: Persisted, source: string) {
   for (const [id, w] of Object.entries(data.workspaces ?? {})) {
     // Migrate workspaces saved before trials existed.
     if ((w.plan as string) === "free") w.plan = "trial";
     w.trialEndsAt ??= new Date(Date.now() + TRIAL_DAYS * 864e5).toISOString();
     w.ownerId ??= null;
+    // One-time repair: plan items an older parser saved as teammates go back on the graph as tasks.
+    const fix = repairMisreadMembers(w.project);
+    if (fix.fixed.length) {
+      w.project = fix.project;
+      for (const id of Object.keys(w.joinCodes)) if (!w.project.members.some((m) => m.id === id)) delete w.joinCodes[id];
+      w.history.push({ id: shortId(8), at: new Date().toISOString(), actor: "hades-agent", action: "plan_edited", summary: `Fixed items that were added as people: ${fix.fixed.join(", ")}`, projectVersion: w.project.version });
+      repaired = true;
+    }
     workspaces.set(id, w);
   }
   for (const [id, u] of Object.entries(data.users ?? {})) users.set(id, u);
   console.log(`Loaded ${workspaces.size} workspaces and ${users.size} users from ${source}`);
+  if (repaired) scheduleFlush();
 }
 
 /** Loads the saved state. Call once before the server starts listening. */

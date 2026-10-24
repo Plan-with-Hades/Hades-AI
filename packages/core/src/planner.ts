@@ -316,7 +316,7 @@ export const AGENT_HELP = [
   "Here's what I can do:",
   "• Plan a hackathon for 200 people on 20 Dec",
   "• Add Meera as design lead (meera@college.edu)",
-  "• Add task Print badges for Kavya (2 days) after T7",
+  "• Add an event Award ceremony for Thiru (1 day) · Add task Print badges for Kavya after T7",
   "• T3 is done · T5 is blocked · give T4 to Rohan",
   "• How are we doing?  (progress tracker)",
   "• Nudge owners of late tasks",
@@ -358,7 +358,9 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
   }
 
   // New event plan
-  const planMatch = text.match(/^(?:plan|organi[sz]e|set up|create|new|start)\s+(?:a|an|the|our|my)?\s*(.+)$/i);
+  // Whole-event planning: "plan/organise/set up …", or "create/start …" on an empty event. Never "add".
+  const planVerb = p.tasks.length ? /^(?:plan|organi[sz]e|set up)\s+(?:a|an|the|our|my)?\s*(.+)$/i : /^(?:plan|organi[sz]e|set up|create|new|start)\s+(?:a|an|the|our|my)?\s*(.+)$/i;
+  const planMatch = /(called|named)/i.test(text) && p.tasks.length ? null : text.match(planVerb);
   if (planMatch && /\b(event|fest|festival|conference|summit|hackathon|meetup|workshop|wedding|launch|party|day|night|expo|match|tournament|concert)\b/i.test(planMatch[1])) {
     const date = parseDate(text, now);
     const name = planMatch[1]
@@ -376,16 +378,16 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
     };
   }
 
-  // People
-  const addPerson = text.match(/^(?:add|invite|onboard)\s+([A-Za-z][\w .'-]*?)\s+(?:as|to|for)\s+(?:the\s+|our\s+|a\s+|an\s+)?(.+?)(?:\s+team)?\s*(?:[(<]?\s*([\w.+-]+@[\w-]+\.[\w.]+)\s*[)>]?)?\s*\.?$/i);
-  if (addPerson && !/^task\b/i.test(addPerson[1])) {
-    const out = addMember(p, { name: addPerson[1], role: addPerson[2].replace(/[\w.+-]+@[\w-]+\.[\w.]+/, "").trim(), email: addPerson[3] });
+  // People: only when it clearly names a person ("Add Meera as marketing", "Invite dev@x.com", "Add Ravi to the team").
+  const person = parsePerson(text);
+  if (person) {
+    const out = addMember(p, person);
     const reassigned = rebalance(out.project, out.member);
     return {
       project: reassigned.project,
       newMembers: [out.member],
       intents: [],
-      reply: `Added ${out.member.name} (${out.member.role}).${reassigned.moved.length ? ` Handed over ${reassigned.moved.join(", ")} to match the role.` : ""} Share their join code from Connect team so their agent can brief them on Telegram or WhatsApp.`,
+      reply: `Added ${out.member.name} (${out.member.role}) to the team.${reassigned.moved.length ? ` Handed over ${reassigned.moved.join(", ")} to match the role.` : ""}`,
     };
   }
   const removePerson = text.match(/^(?:remove|drop)\s+([A-Za-z][\w .'-]*?)(?:\s+from\s+(?:the\s+)?team)?\s*\.?$/i);
@@ -394,18 +396,21 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
     if (m) return { project: removeMember(p, m.id), intents: [], reply: `Removed ${m.name}. Their tasks went back to ${p.members[0].name}.` };
   }
 
-  // Tasks
-  const addT = text.match(/^(?:add|create|new)\s+(?:a\s+)?task\s*:?\s+["“]?(.+?)["”]?(?:\s+for\s+([A-Za-z]\w*))?(?:\s*\(?\s*(\d+(?:\.\d+)?)\s*(?:d|days?)\s*\)?)?(?:\s+after\s+([\w,\s]+))?\s*\.?$/i);
-  if (addT) {
-    const owner = addT[2] ? findMember(p, addT[2]) : undefined;
-    const after = addT[4] ? addT[4].split(/[\s,]+/).filter(Boolean).map((s) => s.toUpperCase()) : [];
-    const out = addTask(p, { title: addT[1], ownerId: owner?.id, estimateDays: addT[3] ? Number(addT[3]) : 2, after });
-    const sched = scheduleProject(out.project);
+  // Tasks, events and activities: anything you "add", "create" or "schedule" that isn't a person goes on the graph.
+  const item = parseItem(p, text);
+  if (item) {
+    let out = addTask(p, { title: item.title, ownerId: item.ownerId, estimateDays: item.days, after: item.after });
+    let project = out.project;
+    if (!item.after.length) project = connect(project, out.task.id);
+    const sched = scheduleProject(project);
     const st = sched.tasks[out.task.id];
+    const owner = p.members.find((m) => m.id === out.task.ownerId)?.name;
     return {
-      project: out.project,
+      project,
       intents: [],
-      reply: `Added ${out.task.id} "${out.task.title}" for ${p.members.find((m) => m.id === out.task.ownerId)?.name}, ${formatShort(st.startDate)} → ${formatShort(st.endDate)}. ${sched.feasible ? "The event date still holds." : `Heads up: the plan now lands ${formatShort(sched.finishDate)}.`}`,
+      reply: `Added ${out.task.id} "${out.task.title}" to the plan for ${owner}, ${formatShort(st.startDate)} → ${formatShort(st.endDate)}. It's on the graph now. ${
+        sched.feasible ? "The event date still holds." : `Heads up: the plan now lands ${formatShort(sched.finishDate)}.`
+      }`,
     };
   }
   const reassign = text.match(/^(?:give|assign|move|hand)\s+([A-Za-z]?\d+)\s+(?:over\s+)?to\s+([A-Za-z]\w*)/i);
@@ -443,6 +448,114 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
 
   // Anything else is treated as a change to trace through the plan.
   return { reply: "That sounds like a change. Tracing its ripple through the plan…", intents: [{ tool: "analyze_change", args: { request: text } }] };
+}
+
+/* ---------------- Reading people vs. plan items ---------------- */
+
+const EMAIL = /[\w.+-]+@[\w-]+\.[\w.]+/;
+/** Words that start a plan item, never a person's name. */
+const NOT_A_NAME = /^(a|an|the|some|for|to|on|at|in|by|with|new|another|task|event|activity|session|item|step|todo|meeting|call|workshop|talk|reminder|milestone|deadline|booking|book|catering|food|reel|video|stage|venue)\b/i;
+const ITEM_WORDS = /\b(task|event|activity|session|item|step|todo|to-do|meeting|call|workshop|talk|reminder|milestone|booking|catering|shoot|reel|rehearsal|ceremony|keynote|panel)\b/i;
+
+export function parsePerson(text: string): { name: string; role?: string; email?: string } | null {
+  const email = text.match(EMAIL)?.[0];
+  const m = text.match(/^(?:add|invite|onboard)\s+(.+?)\s*$/i);
+  if (!m) return null;
+  let rest = m[1].replace(/[(<]?\s*[\w.+-]+@[\w-]+\.[\w.]+\s*[)>]?/, " ").replace(/\s+/g, " ").trim().replace(/\.$/, "");
+  const explicitTeam = /\b(to|into|on)\s+(the|our|my)\s+team\b|\b(as\s+a\s+)?(teammate|team member|member|volunteer)\b/i.test(rest);
+  const asRole = rest.match(/^(.+?)\s+as\s+(?:the\s+|our\s+|a\s+|an\s+)?(.+)$/i);
+  let name = "";
+  let role: string | undefined;
+  if (asRole) {
+    name = asRole[1];
+    role = asRole[2].replace(/\s+(to|into|on)\s+(the|our|my)\s+team$/i, "");
+  } else if (explicitTeam || email) {
+    name = rest.replace(/\s+(to|into|on)\s+(the|our|my)\s+team\b.*$/i, "").replace(/\s+for\s+.+$/i, "");
+    const forRole = rest.match(/\s+for\s+(.+)$/i);
+    role = forRole?.[1];
+  } else return null;
+  name = name.trim();
+  // A person's name: 1-3 words, no plan-item words, doesn't start like a sentence.
+  if (!name || NOT_A_NAME.test(name) || ITEM_WORDS.test(name) || name.split(/\s+/).length > 3) return email && !name ? { name: email.split("@")[0], role, email } : null;
+  if (!email && !asRole && !explicitTeam) return null;
+  const pretty = name.replace(/\b\w/g, (c) => c.toUpperCase());
+  return { name: pretty, role: role?.trim() || undefined, email };
+}
+
+export function parseItem(p: Project, text: string): { title: string; ownerId?: string; days: number; after: string[] } | null {
+  const m = text.match(/^(?:add|create|schedule|plan in|put in|new|include)\s+(.+)$/i);
+  if (!m) return null;
+  let rest = m[1].trim().replace(/\.$/, "");
+  // Strip the item word itself: "an event for…", "a task:", "task".
+  rest = rest.replace(/^(?:a|an|the|another|new)?\s*(?:task|event|activity|session|item|step|todo|to-do|sub-?event|milestone)\b\s*:?\s*/i, "");
+  const days = Number(rest.match(/\(?\s*(\d+(?:\.\d+)?)\s*(?:days?|d)\b\s*\)?/i)?.[1] ?? 0) || 2;
+  rest = rest.replace(/\(?\s*\d+(?:\.\d+)?\s*(?:days?|d)\b\s*\)?/i, " ");
+  const afterMatch = rest.match(/\s+after\s+((?:[A-Za-z]\d{1,3}[\s,]*(?:and\s+)?)+)/i);
+  const after = afterMatch ? afterMatch[1].split(/[\s,]+|and/).filter(Boolean).map((x) => x.toUpperCase()).filter((id) => p.tasks.some((t) => t.id === id)) : [];
+  if (afterMatch) rest = rest.replace(afterMatch[0], " ");
+  // Owner: any teammate mentioned by name ("for director Thiru", "by Meera", "Rohan to …").
+  let ownerId: string | undefined;
+  for (const mem of p.members) {
+    const first = mem.name.split(" ")[0];
+    if (first.length < 2) continue;
+    const re = new RegExp(`(?:\\b(?:for|by|with|assigned to|owner|owned by)\\s+)?(?:\\b[a-z]+\\s+)?\\b${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b(?:\\s+to\\b)?`, "i");
+    if (new RegExp(`\\b${first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(rest)) {
+      ownerId = mem.id;
+      // Remove "for director Thiru to" style phrases from the title, keep the action.
+      const phrase = rest.match(new RegExp(`(?:\\b(?:for|by|with|assigned to|owned by)\\s+)(?:[a-z]+\\s+)?${first}\\b(?:\\s+to\\b)?`, "i")) ?? rest.match(re);
+      if (phrase) rest = rest.replace(phrase[0], " ");
+      break;
+    }
+  }
+  const title = rest
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^(?:for|to|called|named|on|about|:)\s+/i, "")
+    .replace(/^(?:a|an|the)\s+/i, "")
+    .replace(/^\w/, (c) => c.toUpperCase());
+  if (title.length < 3) return null;
+  return { title, ownerId, days, after };
+}
+
+/** Hooks a new item into the plan so it sits on the path to the event: after the kickoff, before the final step. */
+function connect(p: Project, id: string): Project {
+  const others = p.tasks.filter((t) => t.id !== id);
+  if (!others.length) return p;
+  const hasPred = new Set(p.dependencies.map((d) => d.to));
+  const hasSucc = new Set(p.dependencies.map((d) => d.from));
+  const root = others.find((t) => !hasPred.has(t.id));
+  const sinks = others.filter((t) => !hasSucc.has(t.id));
+  const last = sinks[sinks.length - 1];
+  let out = p;
+  for (const [from, to] of [
+    [root?.id, id],
+    [id, last?.id],
+  ] as const) {
+    if (!from || !to || from === to) continue;
+    try {
+      out = addDependency(out, from, to);
+    } catch {}
+  }
+  return out;
+}
+
+/** Repairs teammates that an older parser created from plan items ("an event", "for booking catering"). */
+export function repairMisreadMembers(p: Project): { project: Project; fixed: string[] } {
+  const bogus = p.members.slice(1).filter((m) => !m.email && (NOT_A_NAME.test(m.name) || ITEM_WORDS.test(m.name)));
+  if (!bogus.length) return { project: p, fixed: [] };
+  let project = p;
+  const fixed: string[] = [];
+  for (const m of bogus) {
+    project = removeMember(project, m.id);
+    const words = `${m.name} ${m.role && m.role !== "Team member" ? `for ${m.role}` : ""}`.trim();
+    const item = parseItem(project, `add ${words}`);
+    if (item && !/^an? event$/i.test(item.title)) {
+      const out = addTask(project, { title: item.title, ownerId: item.ownerId, estimateDays: item.days, after: item.after });
+      project = connect(out.project, out.task.id);
+      fixed.push(`${out.task.id} ${out.task.title}`);
+    } else fixed.push(`removed "${m.name}"`);
+  }
+  return { project, fixed };
 }
 
 /** After adding someone, hand them unstarted tasks that match their role better than the current owner. */
