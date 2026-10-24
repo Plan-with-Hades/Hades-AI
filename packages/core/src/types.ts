@@ -33,6 +33,8 @@ export interface Task {
   acceptanceCriteria: string[];
   tags: string[];
   version: number;
+  /** Earliest date the task may start (yyyy-mm-dd), e.g. "the shoot is on 12 Dec". */
+  notBefore?: string;
 }
 
 /** `from` must finish before `to` can start. */

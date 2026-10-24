@@ -57,7 +57,8 @@ export function schedule(
     const id = ready[0];
     const t = byId.get(id)!;
     const depsDone = Math.max(0, ...graph.predecessors.get(id)!.map((p) => finish.get(p)!));
-    const s = Math.max(depsDone, ownerFree.get(t.ownerId) ?? 0);
+    const floor = t.notBefore ? Math.max(0, workingDaysBetween(project.startDate, t.notBefore)) : 0;
+    const s = Math.max(depsDone, ownerFree.get(t.ownerId) ?? 0, floor);
     const f = s + duration(t);
     start.set(id, s);
     finish.set(id, f);

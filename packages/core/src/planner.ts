@@ -246,6 +246,16 @@ export function parseDate(text: string, now = new Date()): string | null {
     if (d < now) d.setFullYear(d.getFullYear() + 1);
     return toISO(d);
   }
+  const wd = text.match(/\b(?:(next|this|coming)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i);
+  if (wd) {
+    const target = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"].indexOf(wd[2].toLowerCase());
+    const d = new Date(now);
+    let add = (target - d.getDay() + 7) % 7;
+    if (add === 0) add = 7;
+    if (/next/i.test(wd[1] ?? "") && add < 7) add += 7;
+    d.setDate(d.getDate() + add);
+    return toISO(d);
+  }
   const rel = text.match(/\bin\s+(\d+)\s+(day|week|month)s?\b/i);
   if (rel) {
     const d = new Date(now);

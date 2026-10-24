@@ -1,6 +1,7 @@
 import { formatShort } from "./dates";
 import { buildGraph, downstreamOf, hasCycle } from "./graph";
 import { schedule } from "./schedule";
+import { parseDate } from "./planner";
 import type {
   AgentRun,
   Dependency,
@@ -619,11 +620,14 @@ export function analyzeChange(project: Project, request: string, opts: AnalyzeOp
   if (!template && !deferMatch && text.length > 0) {
     const anchor = direct[0];
     const id = nextId();
+    // A change with a date in it ("on 12 Dec", "Friday") fixes when the new work can start; "3 days" sets its length.
+    const days = Number(text.match(/\b(\d+(?:\.\d+)?)\s*(?:working\s+)?days?\b/i)?.[1] ?? 0) || 2;
+    const when = parseDate(text);
     scopeChanges.push({
       id: `chg-${id}`,
       type: "add_task",
       agent: "scope",
-      summary: `Add task: ${text.replace(/[.!]+$/, "")}`,
+      summary: `Add task: ${text.replace(/[.!]+$/, "")}${when ? ` (from ${formatShort(when)}, ${days} days)` : ` (${days} days)`}`,
       reason: anchor ? `Closest existing work is ${anchor.id} "${anchor.title}".` : "No existing task covers this request.",
       basis: "ai_inference",
       newTask: {
@@ -633,7 +637,8 @@ export function analyzeChange(project: Project, request: string, opts: AnalyzeOp
         ownerId: anchor?.ownerId ?? project.members[0].id,
         status: "not_started",
         priority: "medium",
-        estimateDays: null,
+        estimateDays: days,
+        ...(when ? { notBefore: when } : {}),
         acceptanceCriteria: [],
         tags: domains,
       },
