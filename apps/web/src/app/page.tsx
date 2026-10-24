@@ -7,11 +7,11 @@ import { Logo } from "@/components/logo";
 const STEPS = [
   {
     t: "Say what changed",
-    d: "“Our title sponsor pulled out, but the fest date can't move.” Type it, forward it from an email, or send it on WhatsApp.",
+    d: "“The ballroom is double-booked.” “A new hire’s laptop is delayed.” “Our sponsor pulled out.” Type it in plain words, or reply from Telegram.",
   },
   {
     t: "Watch the ripple",
-    d: "Hades walks your event plan and lights up every task, owner and deadline the change touches: posters, vendors, passes, run-of-show. Graph facts are marked apart from AI guesses.",
+    d: "Hades walks your plan and lights up every task, owner and deadline the change touches: bookings, vendors, hires, approvals. Graph facts are marked apart from AI guesses.",
   },
   {
     t: "Agents argue it out",
@@ -24,7 +24,7 @@ const STEPS = [
 ];
 
 const AGENTS = [
-  { name: "Orchestrator", q: "What should the manager decide?", tone: "text-text", note: "Runs on AgenticOrg" },
+  { name: "Orchestrator", q: "What should the manager decide?", tone: "text-text", note: "Reconciles the others" },
   { name: "Scope agent", q: "What work needs to change?", tone: "text-styx-2", note: "Maps the request to tasks" },
   { name: "Conflict agent", q: "What breaks, and who is affected?", tone: "text-ember", note: "Walks the dependency graph" },
   { name: "Timeline agent", q: "Can we still make the date?", tone: "text-ok", note: "Deterministic scheduler" },
@@ -72,8 +72,8 @@ export default function Home() {
 
           <div className="mt-10 grid items-end gap-8 md:grid-cols-[1.2fr_1fr]">
             <p className="max-w-xl text-[17px] leading-relaxed text-muted">
-              A sponsor pulls out. The venue moves. The chief guest wants a new slot. Hades traces every task, owner and
-              deadline the change touches, lets specialist agents plan the response, and waits for your{" "}
+              A sponsor pulls out. A hire’s start date slips. The banquet hall is double-booked. Hades traces every task,
+              owner and deadline the change touches, lets specialist agents plan the response, and waits for your{" "}
               <span className="text-text">yes</span> before anything moves.
             </p>
             <div className="flex flex-wrap gap-3 md:justify-end">
@@ -226,13 +226,20 @@ export default function Home() {
         <div className="relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-line-2 p-10 sm:p-14">
           <div aria-hidden className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-styx/20 blur-3xl" />
           <div aria-hidden className="absolute -bottom-32 -left-16 h-80 w-80 rounded-full bg-ember/15 blur-3xl" />
-          <span className="label relative">Running an event soon?</span>
+          <span className="label relative">Any plan with dependencies</span>
           <h2 className="display relative mt-5 max-w-3xl text-[clamp(26px,3.4vw,44px)] font-bold leading-[1.05]">
-            College fests, meetups, hackathons, launches. If one change can break your plan, run it on Hades.
+            Events, hiring and onboarding, hotels and banquets, offsites, launches. If one change can break your plan, run it on Hades.
           </h2>
+          <ul className="relative mt-6 flex flex-wrap gap-2 text-[13px] text-muted">
+            {["Event teams", "HR and onboarding", "Hotels and venues", "Agencies", "Product launches", "Clubs and campuses"].map((u) => (
+              <li key={u} className="rounded-full border border-line-2 px-3.5 py-1.5">
+                {u}
+              </li>
+            ))}
+          </ul>
           <div className="relative mt-8 flex flex-wrap gap-3">
             <Link href="/app" className="rounded-full bg-text px-6 py-3.5 text-sm font-semibold text-bg transition hover:bg-styx-2">
-              Try it on a sample fest
+              Plan something now
             </Link>
           </div>
         </div>

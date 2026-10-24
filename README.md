@@ -4,7 +4,7 @@
 
 **Every change has a ripple. Hades sees it first.**
 
-Hades AI is an agentic management platform. You describe a change ("the chief guest moved to Friday", "a sponsor pulled out"), and Hades traces every task, owner and deadline it touches, lets specialist agents plan the response, and waits for your approval before anything moves. Then member agents brief each affected person and re-plan when they push back.
+Hades AI is an agentic management platform for any team that runs on a plan: event organisers, HR and onboarding, hotels and banquets, offsites and launches. You describe a change ("the chief guest moved to Friday", "a new hire's laptop is delayed", "a sponsor pulled out"), and Hades traces every task, owner and deadline it touches, lets specialist agents plan the response, and waits for your approval before anything moves. Then member agents brief each affected person and re-plan when they push back.
 
 Built at **AI Builders Day '26** (Airtribe × Pine Labs) by Team 1.
 

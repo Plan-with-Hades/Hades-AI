@@ -10,7 +10,7 @@ const jetbrains = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["lati
 export const metadata: Metadata = {
   title: "Hades AI · God of Event Management",
   description:
-    "AI event management that sees the ripple of every change. A sponsor pulls out or the venue moves: Hades traces every task, owner and deadline it touches, plans the response with specialist agents, and waits for your approval.",
+    "AI project and event management that sees the ripple of every change. A sponsor pulls out, a hire starts late or a ballroom is double-booked: Hades traces every task, owner and deadline it touches, plans the response with specialist agents, and waits for your approval.",
   openGraph: {
     title: "Hades AI · God of Event Management",
     description: "Every change has a ripple. Hades sees it before it hits.",

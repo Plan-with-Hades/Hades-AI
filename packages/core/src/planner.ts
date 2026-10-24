@@ -156,7 +156,56 @@ const EXTRA: Record<string, Step[]> = {
   ],
 };
 
+/** Whole-plan templates for work that is not an event with a stage: they replace the base steps. */
+const CUSTOM: Record<string, Step[]> = {
+  onboarding: [
+    { key: "approve", title: "Confirm roles, start dates and budget", days: 2, domain: "lead", after: [], priority: "high" },
+    { key: "offers", title: "Send offer letters and collect paperwork", days: 3, domain: "registration", after: ["approve"], priority: "high" },
+    { key: "devices", title: "Order laptops and set up accounts", days: 4, domain: "venue", after: ["approve"] },
+    { key: "desks", title: "Prepare desks, access cards and seating", days: 2, domain: "venue", after: ["approve"] },
+    { key: "plan", title: "Write each hire’s 30-day plan with their manager", days: 3, domain: "lead", after: ["offers"] },
+    { key: "training", title: "Schedule orientation and role training", days: 3, domain: "content", after: ["offers"] },
+    { key: "buddies", title: "Assign buddies and intro meetings", days: 2, domain: "registration", after: ["plan"] },
+    { key: "welcome", title: "First-day welcome and orientation", days: 1, domain: "registration", after: ["devices", "desks", "training", "buddies"], priority: "critical" },
+    { key: "checkin", title: "Week-one check-in with each hire", days: 2, domain: "lead", after: ["welcome"] },
+  ],
+  hiring: [
+    { key: "brief", title: "Agree the role brief, headcount and budget", days: 2, domain: "lead", after: [], priority: "high" },
+    { key: "posts", title: "Write and publish the job posts", days: 2, domain: "marketing", after: ["brief"] },
+    { key: "source", title: "Source candidates and collect applications", days: 5, domain: "registration", after: ["posts"], priority: "high" },
+    { key: "screen", title: "Screen applications and phone-screen shortlist", days: 4, domain: "registration", after: ["source"] },
+    { key: "panel", title: "Brief interview panels and prepare questions", days: 2, domain: "content", after: ["brief"] },
+    { key: "schedule", title: "Schedule interviews and rooms", days: 2, domain: "venue", after: ["screen", "panel"] },
+    { key: "interviews", title: "Run the interviews", days: 4, domain: "content", after: ["schedule"], priority: "high" },
+    { key: "offers", title: "Debrief, approve and send offers", days: 3, domain: "lead", after: ["interviews"], priority: "critical" },
+  ],
+  offsite: [
+    { key: "approve", title: "Agree goals, budget and headcount", days: 2, domain: "lead", after: [], priority: "high" },
+    { key: "venue", title: "Choose and book the venue or destination", days: 4, domain: "venue", after: ["approve"], priority: "high" },
+    { key: "travel", title: "Book travel and stays", days: 4, domain: "venue", after: ["venue"] },
+    { key: "agenda", title: "Build the agenda and sessions", days: 4, domain: "content", after: ["approve"] },
+    { key: "activities", title: "Plan team activities and dinners", days: 3, domain: "content", after: ["venue"] },
+    { key: "food", title: "Confirm catering and dietary needs", days: 3, domain: "venue", after: ["venue"] },
+    { key: "comms", title: "Send invites, logistics and what-to-pack", days: 2, domain: "registration", after: ["travel", "agenda"] },
+    { key: "onsite", title: "Final checks and onsite run", days: 1, domain: "lead", after: ["comms", "activities", "food"], priority: "critical" },
+  ],
+  banquet: [
+    { key: "brief", title: "Confirm the client brief, headcount and budget", days: 2, domain: "lead", after: [], priority: "high" },
+    { key: "hall", title: "Hold the ballroom and agree the layout", days: 2, domain: "venue", after: ["brief"], priority: "high" },
+    { key: "menu", title: "Menu tasting and food and beverage order", days: 4, domain: "venue", after: ["brief"] },
+    { key: "av", title: "AV, lighting and stage check", days: 2, domain: "venue", after: ["hall"] },
+    { key: "decor", title: "Flowers, decor and signage deliveries", days: 3, domain: "marketing", after: ["hall"] },
+    { key: "staff", title: "Staffing plan and rooming list", days: 3, domain: "registration", after: ["menu"] },
+    { key: "walk", title: "Client walkthrough and sign-off", days: 1, domain: "lead", after: ["av", "decor", "staff"], priority: "high" },
+    { key: "run", title: "Run the event", days: 1, domain: "lead", after: ["walk"], priority: "critical" },
+  ],
+};
+
 const EVENT_WORDS: [RegExp, string][] = [
+  [/onboard|new hire|orientation|induction|joiner/i, "onboarding"],
+  [/hiring|recruit|interview drive|campus drive|job fair/i, "hiring"],
+  [/offsite|off-site|retreat|team outing|team trip/i, "offsite"],
+  [/banquet|ballroom|hotel|gala|corporate dinner|reception hall|catering order/i, "banquet"],
   [/hackathon|hack day|buildathon/i, "hackathon"],
   [/conference|summit|symposium|meetup|workshop/i, "conference"],
   [/wedding|reception|marriage|sangeet/i, "wedding"],
@@ -167,11 +216,11 @@ const EVENT_WORDS: [RegExp, string][] = [
 
 const DOMAIN_WORDS: Record<Domain, RegExp> = {
   lead: /lead|head|organi[sz]er|manager|coordinator/i,
-  sponsor: /sponsor|finance|partnership|budget|fund/i,
-  venue: /venue|logistic|vendor|ops|operation|hospitality/i,
+  sponsor: /sponsor|finance|account|procure|partnership|budget|fund|sales/i,
+  venue: /venue|logistic|vendor|ops|operation|hospitality|facilit|admin|housekeep|banquet|f&b|kitchen|catering|front\s*desk|\bit\b/i,
   marketing: /market|design|social|brand|pr\b|media|content creator/i,
-  registration: /registration|volunteer|community|ticket|attendee|rsvp/i,
-  content: /speaker|program|content|curat|tech|judge|agenda/i,
+  registration: /registration|volunteer|community|ticket|attendee|rsvp|\bhr\b|people|recruit|talent|onboard|guest\s*rel/i,
+  content: /speaker|program|content|curat|tech|judge|agenda|train|learning|l&d/i,
   ops: /ops|operation/i,
 };
 
@@ -213,10 +262,13 @@ export function parseDate(text: string, now = new Date()): string | null {
 export function generatePlan(p: Project, input: { name?: string; date?: string | null; brief?: string }, now = new Date()): Project {
   const text = `${input.name ?? ""} ${input.brief ?? ""}`;
   const kind = EVENT_WORDS.find(([re]) => re.test(text))?.[1];
-  const steps = [...BASE, ...(kind ? EXTRA[kind] : [])];
-  // Extras feed the rehearsal so they sit on the path to the event.
-  const rehearsal = steps.find((s) => s.key === "rehearsal")!;
-  for (const e of kind ? EXTRA[kind] : []) if (!rehearsal.after.includes(e.key)) rehearsal.after = [...rehearsal.after, e.key];
+  const custom = kind ? CUSTOM[kind] : undefined;
+  const steps: Step[] = (custom ?? [...BASE, ...(kind ? (EXTRA[kind] ?? []) : [])]).map((s) => ({ ...s, after: [...s.after] }));
+  if (!custom) {
+    // Extras feed the rehearsal so they sit on the path to the event.
+    const rehearsal = steps.find((s) => s.key === "rehearsal")!;
+    for (const e of kind ? (EXTRA[kind] ?? []) : []) if (!rehearsal.after.includes(e.key)) rehearsal.after = [...rehearsal.after, e.key];
+  }
   const today = toISO(nextWorkingDay(now));
   const deadline = input.date && input.date > today ? input.date : addWorkingDays(today, 20);
   const ids = new Map(steps.map((s, i) => [s.key, `T${i + 1}`]));
@@ -335,7 +387,8 @@ const STATUS_WORDS: [RegExp, TaskStatus][] = [
 
 export const AGENT_HELP = [
   "Here's what I can do:",
-  "• Plan a hackathon for 200 people on 20 Dec",
+  "• Plan a hackathon for 200 people on 20 Dec  ·  Plan onboarding for 5 new hires on 2 Dec",
+  "• Plan a hiring drive  ·  Plan a banquet for 150 guests  ·  Plan a team offsite",
   "• Add Meera as design lead (meera@college.edu)",
   "• Add an event Award ceremony for Thiru (1 day) · Add task Print badges for Kavya after T7",
   "• T3 is done · T5 is blocked · give T4 to Rohan",
@@ -379,7 +432,7 @@ export function runCommand(p: Project, raw: string, now = new Date(), opts: { ma
   }
 
   // New event plan: a whole plan from one sentence. "add …" never plans; "called X" on an existing plan adds one item.
-  const EVENT_NOUN = /\b(event|fest|festival|conference|summit|hackathon|meetup|workshop|wedding|launch|party|birthday|anniversary|farewell|reunion|celebration|ceremony|expo|match|tournament|concert|night|day)\b/i;
+  const EVENT_NOUN = /\b(event|fest|festival|conference|summit|hackathon|meetup|workshop|wedding|launch|party|birthday|anniversary|farewell|reunion|celebration|ceremony|expo|match|tournament|concert|night|day|onboarding|orientation|induction|hiring|recruitment|drive|offsite|off-site|retreat|banquet|gala|dinner|training|bootcamp|seminar|exhibition|fair|trip|tour|rollout|project|campaign|sprint)\b/i;
   const planMatch = text.match(/^(?:please\s+)?(?:plan|organi[sz]e|arrange|throw|host|set up|create|make|start|new|build|generate)\s+(?:(?:a|an|the|our|my|me)\s+)?(.+)$/i);
   const isItem = /\b(task|activity|session|step|todo|milestone|reminder)\b/i.test(text) || (/\b(called|named)\b/i.test(text) && p.tasks.length > 0);
   if (planMatch && !isItem && EVENT_NOUN.test(planMatch[1])) {

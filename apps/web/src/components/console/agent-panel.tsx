@@ -5,6 +5,7 @@ import type { AgentTurn, GoogleLinks } from "@hades/core";
 
 const QUICK = [
   "Plan a hackathon for 300 people on 20 Dec",
+  "Plan onboarding for 5 new hires",
   "Add Meera as marketing lead",
   "Add an event Award ceremony (1 day)",
   "How are we doing?",

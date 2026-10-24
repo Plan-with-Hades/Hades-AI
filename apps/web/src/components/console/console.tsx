@@ -765,7 +765,7 @@ export function Console() {
               value={request}
               onChange={(e) => setRequest(e.target.value)}
               rows={3}
-              placeholder="e.g. Our title sponsor pulled out, but the fest date can't move."
+              placeholder="e.g. The ballroom is double-booked. Or: the new hire’s laptop is delayed."
               className="mt-2 w-full resize-none rounded-xl border border-line-2 bg-surface px-3.5 py-3 text-sm leading-relaxed text-text outline-none transition placeholder:text-dim focus:border-styx"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) analyze(request);
