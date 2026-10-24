@@ -4,7 +4,15 @@ import type { AgentTurn, EffectivePlan, ImpactReport, PublicUser, WorkspaceState
 const RAW_API = (process.env.NEXT_PUBLIC_API_URL ?? "").trim();
 export const API_URL = (RAW_API && !/^https?:\/\//.test(RAW_API) ? `https://${RAW_API}` : RAW_API).replace(/\/$/, "");
 
-export type ServerWorkspace = WorkspaceState & { effectivePlan: EffectivePlan };
+export type ServerWorkspace = WorkspaceState & { effectivePlan: EffectivePlan; role?: "manager" | "member" | "guest" };
+export interface InviteResult {
+  memberId: string;
+  email: string;
+  emailed: boolean;
+  shared: boolean;
+  link: string;
+  note?: string;
+}
 
 export interface Meta {
   payments: { mode: "live" | "test" | "simulated"; pricePaise: number; trialDays: number };
@@ -17,7 +25,7 @@ export interface Meta {
 
 export interface Me {
   user: PublicUser;
-  workspaces: { id: string; name: string; plan: EffectivePlan; trialEndsAt: string; updatedAt: string }[];
+  workspaces: { id: string; name: string; role: "manager" | "member"; plan: EffectivePlan; trialEndsAt: string; updatedAt: string }[];
 }
 
 export class ApiError extends Error {
@@ -85,6 +93,9 @@ export const api = {
   reject: (id: string, reportId: string) => post<ServerWorkspace>(`/api/workspaces/${id}/reject`, { reportId }),
   memberUpdate: (id: string, body: { memberId: string; taskId: string; estimateDays?: number; note: string }) =>
     post<ServerWorkspace>(`/api/workspaces/${id}/member-updates`, body),
+  addMember: (id: string, body: { name: string; role?: string; email: string }) =>
+    post<{ invite: InviteResult; workspace: ServerWorkspace }>(`/api/workspaces/${id}/members`, body),
+  invite: (id: string, memberId: string) => post<{ invite: InviteResult; workspace: ServerWorkspace }>(`/api/workspaces/${id}/members/${memberId}/invite`),
   reset: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/reset`),
   checkout: (id: string) => post<{ checkoutUrl: string; mode: string }>(`/api/workspaces/${id}/checkout`),
   syncCalendar: (id: string) => post<{ created: number; updated: number; workspace: ServerWorkspace }>(`/api/workspaces/${id}/calendar/sync`),

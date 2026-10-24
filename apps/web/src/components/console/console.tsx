@@ -31,7 +31,7 @@ import {
   type WorkspaceState,
 } from "@hades/core";
 import { Logo } from "@/components/logo";
-import { api, API_URL, ApiError, getRememberedWorkspace, getToken, rememberWorkspace, type Meta, type ServerWorkspace } from "@/lib/api";
+import { api, API_URL, ApiError, getRememberedWorkspace, getToken, rememberWorkspace, type InviteResult, type Meta, type ServerWorkspace } from "@/lib/api";
 import { TaskGraph, type Highlight } from "./task-graph";
 import { AgentPanel } from "./agent-panel";
 
@@ -106,7 +106,7 @@ export function Console() {
   const [ws, setWs] = useState<ServerWorkspace | null>(null);
   const [me, setMe] = useState<PublicUser | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [myEvents, setMyEvents] = useState<{ id: string; name: string }[]>([]);
+  const [myEvents, setMyEvents] = useState<{ id: string; name: string; role?: string }[]>([]);
   const [tab, setTab] = useState<"agent" | "ripple">("agent");
   const [localThread, setLocalThread] = useState<AgentTurn[]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
@@ -147,7 +147,7 @@ export function Console() {
           if (cancelled) return;
           setMeta(m);
           setMe(mine?.user ?? null);
-          setMyEvents(mine?.workspaces.map((x) => ({ id: x.id, name: x.name })) ?? []);
+          setMyEvents(mine?.workspaces.map((x) => ({ id: x.id, name: x.name, role: x.role })) ?? []);
           applyServer(w);
           rememberWorkspace(w.id);
           const paid = params.get("paid");
@@ -548,6 +548,7 @@ export function Console() {
                 {myEvents.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.id === ws?.id ? project.name : e.name}
+                    {e.role === "member" ? " (member)" : ""}
                   </option>
                 ))}
               </select>
@@ -555,6 +556,8 @@ export function Console() {
               <span className="truncate text-sm font-semibold">{project.name}</span>
             )}
             <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-muted">v{project.version}</span>
+            {ws?.role === "member" ? <span className="rounded bg-styx/15 px-1.5 py-0.5 font-mono text-[10px] text-styx-2">member</span> : null}
+            {ws?.role === "manager" ? <span className="rounded bg-ok/15 px-1.5 py-0.5 font-mono text-[10px] text-ok">manager</span> : null}
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             <Pill label="Deadline" value={formatShort(project.deadline)} />
@@ -565,7 +568,7 @@ export function Console() {
             />
             <Pill label="Done" value={`${pct}%`} />
             <PlanBadge ws={ws} onUpgrade={() => setUpgradeOpen(true)} />
-            <HeaderButton onClick={() => setConnectOpen(true)}>Connect team</HeaderButton>
+            <HeaderButton onClick={() => setConnectOpen(true)}>Team &amp; invites</HeaderButton>
             {online ? <HeaderButton onClick={newEvent}>+ New event</HeaderButton> : null}
             {me?.workspaceConnected ? (
               ws?.google?.folder ? (
@@ -841,7 +844,7 @@ export function Console() {
           }}
         />
       ) : null}
-      {connectOpen ? <ConnectModal ws={ws} meta={meta} project={project} onClose={() => setConnectOpen(false)} /> : null}
+      {connectOpen ? <ConnectModal ws={ws} meta={meta} project={project} onClose={() => setConnectOpen(false)} onWorkspace={applyServer} canInvite={!!ws && ws.role !== "member"} /> : null}
     </div>
   );
 }
@@ -1313,8 +1316,51 @@ function UpgradeModal({
   );
 }
 
-function ConnectModal({ ws, meta, project, onClose }: { ws: ServerWorkspace | null; meta: Meta | null; project: Project; onClose: () => void }) {
+function ConnectModal({
+  ws,
+  meta,
+  project,
+  onClose,
+  onWorkspace,
+  canInvite,
+}: {
+  ws: ServerWorkspace | null;
+  meta: Meta | null;
+  project: Project;
+  onClose: () => void;
+  onWorkspace: (w: ServerWorkspace) => void;
+  canInvite: boolean;
+}) {
   const [copied, setCopied] = useState<string | null>(null);
+  const [form, setForm] = useState({ name: "", role: "", email: "" });
+  const [sending, setSending] = useState(false);
+  const [last, setLast] = useState<InviteResult | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const add = async () => {
+    if (!ws) return;
+    setSending(true);
+    setErr(null);
+    try {
+      const out = await api.addMember(ws.id, { name: form.name, role: form.role || undefined, email: form.email });
+      onWorkspace(out.workspace);
+      setLast(out.invite);
+      setForm({ name: "", role: "", email: "" });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not add them");
+    } finally {
+      setSending(false);
+    }
+  };
+  const resend = async (memberId: string) => {
+    if (!ws) return;
+    try {
+      const out = await api.invite(ws.id, memberId);
+      onWorkspace(out.workspace);
+      setLast(out.invite);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not send the invite");
+    }
+  };
   const copy = async (text: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -1327,11 +1373,11 @@ function ConnectModal({ ws, meta, project, onClose }: { ws: ServerWorkspace | nu
       <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line-2 bg-surface p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div>
-            <span className="label">Member agents</span>
-            <h2 className="display mt-2 text-xl font-bold">Connect your team</h2>
+            <span className="label">Team</span>
+            <h2 className="display mt-2 text-xl font-bold">People &amp; invites</h2>
             <p className="mt-2 text-sm leading-relaxed text-muted">
-              Each teammate links their chat once. After that, Hades briefs them when a change touches their work, and they reply in plain
-              words (&quot;need 2 more days&quot;, &quot;E5 done&quot;) to update the plan.
+              Add teammates by email. Hades invites them from your Gmail and shares the event&apos;s Drive folder; they sign in with Google using that
+              email to see the plan and update their tasks. Calendar invites go out on the next calendar sync.
             </p>
           </div>
           <button onClick={onClose} className="text-muted hover:text-text" aria-label="Close">
@@ -1342,6 +1388,35 @@ function ConnectModal({ ws, meta, project, onClose }: { ws: ServerWorkspace | nu
           <p className="mt-5 rounded-lg border border-warn/30 bg-[var(--warn-soft)] p-3 text-sm">Start the Hades API to connect chats. The web inboxes below the graph work without it.</p>
         ) : (
           <>
+            {canInvite ? (
+              <form
+                className="mt-5 grid gap-2 rounded-xl border border-line bg-bg-2 p-3 sm:grid-cols-[1fr_1fr_1.4fr_auto]"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  add();
+                }}
+              >
+                <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" className="rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
+                <input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="Role (e.g. Marketing)" className="rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
+                <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="Google email" className="rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
+                <button disabled={sending} className="rounded-lg bg-text px-4 py-2 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-50">
+                  {sending ? "Inviting…" : "Add & invite"}
+                </button>
+              </form>
+            ) : null}
+            {err ? <p className="mt-2 text-sm text-ember">{err}</p> : null}
+            {last ? (
+              <p className="mt-2 rounded-lg border border-line bg-bg-2 p-3 text-[12.5px] text-muted">
+                {last.emailed ? `Invite emailed to ${last.email} from your Gmail.` : `Share this link with ${last.email}: `}
+                {!last.emailed ? (
+                  <button onClick={() => copy(last.link)} className="font-mono text-styx-2 underline">
+                    {copied === last.link ? "Copied" : last.link}
+                  </button>
+                ) : null}
+                {last.shared ? " Drive folder shared." : ""}
+                {last.note ? <span className="block text-dim">{last.note}</span> : null}
+              </p>
+            ) : null}
             <div className="mt-5 grid gap-2 text-[12.5px] sm:grid-cols-2">
               <div className="rounded-lg border border-line bg-bg-2 p-3">
                 <span className="label">Telegram</span>
@@ -1378,9 +1453,21 @@ function ConnectModal({ ws, meta, project, onClose }: { ws: ServerWorkspace | nu
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-semibold">{m.name}</span>
                       <span className="block text-[11px] text-muted">
-                        {links.length ? `Linked: ${links.map((l) => (l.channel === "telegram" ? "Telegram" : "WhatsApp")).join(", ")}` : m.role}
+                        {m.role}
+                        {m.email ? ` · ${m.email}` : ""}
+                        {links.length ? ` · Linked: ${links.map((l) => (l.channel === "telegram" ? "Telegram" : "WhatsApp")).join(", ")}` : ""}
                       </span>
+                      {m.email ? (
+                        <span className={`block font-mono text-[10px] ${m.joinedAt ? "text-ok" : "text-dim"}`}>
+                          {m.joinedAt ? "Signed in with Google" : m.invitedAt ? `Invited ${new Date(m.invitedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` : "Not invited yet"}
+                        </span>
+                      ) : null}
                     </span>
+                    {canInvite && m.email && !m.joinedAt && m.id !== project.members[0].id ? (
+                      <button onClick={() => resend(m.id)} className="rounded-lg border border-line-2 px-2.5 py-1.5 text-[11px] text-text hover:border-styx">
+                        {m.invitedAt ? "Resend invite" : "Send invite"}
+                      </button>
+                    ) : null}
                     <button onClick={() => copy(code)} className="rounded-lg border border-line-2 px-2.5 py-1.5 font-mono text-[11px] text-text hover:border-styx">
                       {copied === code ? "Copied" : code}
                     </button>

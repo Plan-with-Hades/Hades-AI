@@ -3,7 +3,8 @@ import { WORKSPACE_SCOPES } from "./auth";
 import { deliver } from "./agents";
 import { syncCalendar } from "./google-calendar";
 import { appendToGoogleFile, createEventWorkspace, createPlanDoc, extractTasks, pullTracker, readGoogleFile, syncTracker } from "./google-workspace";
-import { getWorkspace, newId, updateWorkspace, type StoredUser } from "./store";
+import { getWorkspace, newId, roleIn, updateWorkspace, type StoredUser } from "./store";
+import { inviteMember } from "./invites";
 
 /**
  * The Hades agent behind the console's prompt box. It understands plain commands (people, tasks, new event plans,
@@ -26,6 +27,18 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
   const actor = user?.name ?? w.project.members[0].name;
   const userTurn: AgentTurn = { id: newId(8), at: new Date().toISOString(), role: "user", text: message, by: actor };
   const cmd = runCommand(w.project, message);
+  const role = w.ownerId ? roleIn(w, user) : "manager";
+  if (role !== "manager" && !memberMayApply(w, user, cmd)) {
+    const agentTurn: AgentTurn = {
+      id: newId(8),
+      at: new Date().toISOString(),
+      role: "agent",
+      text: "Only the event manager can change the plan. You can update your own tasks (\"T3 is done\", \"T4 needs 2 more days\") or ask \"How are we doing?\".",
+      engine: "rules",
+    };
+    updateWorkspace(workspaceId, (x) => (x.agentThread = [...(x.agentThread ?? []), userTurn, agentTurn].slice(-MAX_THREAD)));
+    return { turn: agentTurn };
+  }
   const actions: AgentAction[] = [];
   let reply = cmd.reply;
   let analyze: string | undefined;
@@ -39,6 +52,17 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
       x.history.push({ id: newId(8), at: new Date().toISOString(), actor: "hades-agent", action: "plan_edited", summary: `${message} → ${reply.split("\n")[0]}`, projectVersion: x.project.version });
     });
     actions.push({ id: newId(6), tool: "update_task", args: {}, summary: `Plan v${before} → v${cmd.project.version}`, status: "done" });
+    for (const m of cmd.newMembers ?? []) {
+      if (!m.email) continue;
+      try {
+        const inv = await inviteMember(workspaceId, user, m.id);
+        reply += inv.emailed
+          ? ` I emailed ${m.name} an invite from your Gmail${inv.shared ? " and shared the Drive folder" : ""}.`
+          : ` Invite link for ${m.name}: ${inv.link}${inv.note ? ` (${inv.note})` : ""}`;
+      } catch (e) {
+        reply += ` (Invite failed: ${(e as Error).message})`;
+      }
+    }
   }
 
   for (const intent of cmd.intents) {
@@ -193,4 +217,23 @@ export async function nudgeOwners(workspaceId: string): Promise<string> {
   await deliver(workspaceId, messages, ws);
   const names = [...byOwner.keys()].map((id) => w.project.members.find((m) => m.id === id)?.name ?? id);
   return `Nudged ${names.join(", ")} about ${r.overdue.length} overdue and ${r.dueSoon.length} due-soon task(s). Linked teammates got it on Telegram/WhatsApp.\n\n${r.headline}`;
+}
+
+/** Members may update status or estimates of their own tasks and read progress; everything else is the manager's. */
+function memberMayApply(w: WorkspaceState, user: StoredUser | null, cmd: ReturnType<typeof runCommand>): boolean {
+  if (cmd.intents.some((i) => i.tool !== "analyze_change")) return cmd.intents.every((i) => i.tool === "google_read");
+  if (cmd.intents.length) return false;
+  if (!cmd.project) return true;
+  const me = w.project.members.find((m) => m.userId === user?.id || (m.email && m.email.toLowerCase() === user?.email.toLowerCase()));
+  if (!me) return false;
+  const next = cmd.project;
+  if (next.members.length !== w.project.members.length || next.dependencies.length !== w.project.dependencies.length || next.tasks.length !== w.project.tasks.length) return false;
+  if (next.deadline !== w.project.deadline || next.name !== w.project.name) return false;
+  return next.tasks.every((t) => {
+    const old = w.project.tasks.find((x) => x.id === t.id);
+    if (!old) return false;
+    if (old.ownerId !== t.ownerId || old.title !== t.title) return false;
+    const changed = old.status !== t.status || old.estimateDays !== t.estimateDays;
+    return !changed || old.ownerId === me.id;
+  });
 }

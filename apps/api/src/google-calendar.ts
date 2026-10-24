@@ -40,6 +40,7 @@ export async function syncCalendar(user: StoredUser, w: WorkspaceState): Promise
           colorId: st.onCriticalPath ? "11" : "9",
           extendedProperties: { private: { hadesWorkspace: w.id, hadesTask: t.id } },
           transparency: "transparent",
+          attendees: w.project.members.filter((m) => m.id === t.ownerId && m.email && m.email !== user.email).map((m) => ({ email: m.email })),
         },
       };
     });
@@ -53,19 +54,20 @@ export async function syncCalendar(user: StoredUser, w: WorkspaceState): Promise
       colorId: "6",
       extendedProperties: { private: { hadesWorkspace: w.id, hadesTask: "__deadline" } },
       transparency: "opaque",
+      attendees: w.project.members.filter((m) => m.email && m.email !== user.email).map((m) => ({ email: m.email })),
     },
   });
 
   for (const item of items) {
     const prev = existing[item.key];
-    const res = await fetch(prev ? `${CAL}/${encodeURIComponent(prev)}` : CAL, {
+    const res = await fetch(prev ? `${CAL}/${encodeURIComponent(prev)}?sendUpdates=all` : `${CAL}?sendUpdates=all`, {
       method: prev ? "PATCH" : "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(item.body),
     });
     if (res.status === 404 || res.status === 410) {
       // Deleted in Google Calendar: create it again.
-      const again = await fetch(CAL, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(item.body) });
+      const again = await fetch(`${CAL}?sendUpdates=all`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(item.body) });
       if (!again.ok) throw new Error(`Calendar error ${again.status}: ${await again.text()}`);
       events[item.key] = ((await again.json()) as { id: string }).id;
       created++;

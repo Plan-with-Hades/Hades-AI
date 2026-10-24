@@ -17,8 +17,10 @@ if (!process.env.SESSION_SECRET) console.warn("SESSION_SECRET not set: sessions 
 export const googleEnabled = () => !!(CLIENT_ID && CLIENT_SECRET);
 
 export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.send";
 export const WORKSPACE_SCOPES = [
   CALENDAR_SCOPE,
+  GMAIL_SCOPE,
   "https://www.googleapis.com/auth/documents",
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/drive.file",

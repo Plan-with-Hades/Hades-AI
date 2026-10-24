@@ -14,6 +14,11 @@ export interface Member {
   hue: number;
   email?: string;
   phone?: string;
+  /** When the manager's Google account sent the invite. */
+  invitedAt?: string;
+  /** Set once the teammate signs in with Google using the invited email. */
+  userId?: string;
+  joinedAt?: string;
 }
 
 export interface Task {
@@ -186,6 +191,8 @@ export type AuditAction =
   | "payment"
   | "agent_review"
   | "plan_edited"
+  | "member_invited"
+  | "member_joined"
   | "progress_check"
   | "google"
   | "reassessed";
@@ -283,6 +290,8 @@ export interface GoogleLinks {
   tracker?: GoogleFile;
   planDoc?: GoogleFile;
   files: GoogleFile[];
+  /** Emails the event folder is shared with. */
+  sharedWith?: string[];
 }
 
 /* ---------------- The Hades agent ---------------- */

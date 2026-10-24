@@ -190,7 +190,39 @@ export function saveUser(u: StoredUser) {
 }
 export const allUsers = () => [...users.values()];
 export const allWorkspaces = () => [...workspaces.values()];
-export const workspacesOf = (userId: string) => [...workspaces.values()].filter((w) => w.ownerId === userId);
+const sameEmail = (a?: string, b?: string) => !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Events a person runs (owner) or was invited to (their email is on the team). */
+export function workspacesOf(user: Pick<StoredUser, "id" | "email">): { w: WorkspaceState; role: "manager" | "member" }[] {
+  const out: { w: WorkspaceState; role: "manager" | "member" }[] = [];
+  for (const w of workspaces.values()) {
+    if (w.ownerId === user.id) out.push({ w, role: "manager" });
+    else if (w.project.members.some((m) => m.userId === user.id || sameEmail(m.email, user.email))) out.push({ w, role: "member" });
+  }
+  return out.sort((a, b) => b.w.updatedAt.localeCompare(a.w.updatedAt));
+}
+
+export function roleIn(w: WorkspaceState, user: Pick<StoredUser, "id" | "email"> | null): "manager" | "member" | "guest" {
+  if (!user) return "guest";
+  if (w.ownerId === user.id) return "manager";
+  return w.project.members.find((m) => m.userId === user.id || sameEmail(m.email, user.email)) ? "member" : "guest";
+}
+
+/** On sign-in: attach the person to every event that invited their email. Returns the event names joined now. */
+export function linkMemberships(user: StoredUser): string[] {
+  const joined: string[] = [];
+  for (const w of workspaces.values()) {
+    const m = w.project.members.find((x) => !x.userId && sameEmail(x.email, user.email));
+    if (!m) continue;
+    m.userId = user.id;
+    m.joinedAt = new Date().toISOString();
+    w.history.push({ id: shortId(8), at: m.joinedAt, actor: m.name, action: "member_joined", summary: `${m.name} signed in with Google (${user.email}) and joined`, projectVersion: w.project.version });
+    w.updatedAt = m.joinedAt;
+    joined.push(w.project.name);
+  }
+  if (joined.length) scheduleFlush();
+  return joined;
+}
 
 /** Marks a signed-in user as active (at most once a minute) for the developer console. */
 export function touchUser(u: StoredUser) {

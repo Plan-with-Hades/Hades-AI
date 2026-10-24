@@ -7,11 +7,13 @@ import { syncCalendar } from "./google-calendar";
 import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agents";
 import { speak, voiceEnabled } from "./voice/elevenlabs";
 import { runAgent } from "./hades-agent";
+import { inviteMember } from "./invites";
+import { addMember } from "@hades/core";
 import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
 import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
 import { createPinelabsOrder, getPinelabsOrder, isPaidStatus, pinelabsConfigured, pinelabsMode, verifyPinelabsRedirect } from "./payments/pinelabs";
-import { allUsers, allWorkspaces, createWorkspace, initStore, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
+import { allUsers, allWorkspaces, createWorkspace, initStore, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
 
 /**
  * Hades API. Agents propose; this server enforces version checks, ownership, approval gating,
@@ -69,7 +71,7 @@ app.get(
 /* ---------------- Workspaces ---------------- */
 
 /** What the browser sees: the workspace plus its effective plan. */
-const view = (w: WorkspaceState) => ({ ...w, effectivePlan: effectivePlan(w) });
+const view = (w: WorkspaceState, role?: "manager" | "member" | "guest") => ({ ...w, effectivePlan: effectivePlan(w), ...(role ? { role } : {}) });
 
 /** Planning stops when the free trial ends; reading the plan and paying keep working. */
 function requireActivePlan(w: WorkspaceState) {
@@ -83,6 +85,39 @@ app.post("/api/workspaces", (req, res) => {
   const blank = req.body?.blank === true;
   res.status(201).json(view(createWorkspace(u ? { id: u.id, name: u.name, email: u.email } : undefined, { blank })));
 });
+
+/** Add a teammate by email and invite them with the manager's Google account. Managers only (or guest demos). */
+app.post(
+  "/api/workspaces/:id/members",
+  h(async (req, res) => {
+    const b = z.object({ name: z.string().trim().min(1).max(80), role: z.string().trim().max(80).optional(), email: z.string().trim().email() }).parse(req.body);
+    const id = param(req, "id");
+    const w = getWorkspace(id);
+    const u = currentUser(req);
+    if (w.ownerId && roleIn(w, u) !== "manager") return res.status(403).json({ error: "Only the event manager can add people." });
+    if (w.project.members.some((m) => m.email?.toLowerCase() === b.email.toLowerCase())) return res.status(409).json({ error: `${b.email} is already on the team.` });
+    const out = addMember(w.project, b);
+    updateWorkspace(id, (x) => {
+      x.project = out.project;
+      x.joinCodes[out.member.id] = `${x.id}-${out.member.id}`;
+      x.history.push({ id: newId(8), at: new Date().toISOString(), actor: u?.name ?? x.project.members[0].name, action: "plan_edited", summary: `Added ${out.member.name} (${out.member.role}) <${b.email}>`, projectVersion: x.project.version });
+    });
+    const invite = await inviteMember(id, u, out.member.id);
+    res.status(201).json({ invite, workspace: view(getWorkspace(id)) });
+  }),
+);
+
+app.post(
+  "/api/workspaces/:id/members/:memberId/invite",
+  h(async (req, res) => {
+    const id = param(req, "id");
+    const w = getWorkspace(id);
+    const u = currentUser(req);
+    if (w.ownerId && roleIn(w, u) !== "manager") return res.status(403).json({ error: "Only the event manager can send invites." });
+    const invite = await inviteMember(id, u, param(req, "memberId"));
+    res.json({ invite, workspace: view(getWorkspace(id)) });
+  }),
+);
 
 /** The Hades agent: people, tasks, new event plans, progress, and Google Workspace. */
 app.post(
@@ -100,7 +135,7 @@ app.get("/api/workspaces/:id", (req, res) => {
   const w = getWorkspace(param(req, "id"));
   touchWorkspace(w);
   if (req.query.since && req.query.since === w.updatedAt) return res.json({ changed: false, updatedAt: w.updatedAt });
-  res.json(view(w));
+  res.json(view(w, roleIn(w, currentUser(req))));
 });
 
 /** A guest workspace becomes yours when you sign in. */
@@ -462,6 +497,7 @@ app.get(
       return res.redirect(`${WEB_URL}/auth/done#error=${encodeURIComponent(String(req.query.error ?? "Sign-in was cancelled or expired"))}`);
     }
     const user = await completeGoogleLogin(req.query.code, GOOGLE_REDIRECT);
+    linkMemberships(user);
     // Claim the guest workspace the user started in, if it has no owner yet.
     if (state.workspaceId) {
       try {
@@ -483,7 +519,7 @@ app.get("/api/me", (req, res) => {
   if (!u) return res.status(401).json({ error: "Not signed in" });
   res.json({
     user: publicUser(u),
-    workspaces: workspacesOf(u.id).map((w) => ({ id: w.id, name: w.project.name, plan: effectivePlan(w), trialEndsAt: w.trialEndsAt, updatedAt: w.updatedAt })),
+    workspaces: workspacesOf(u).map(({ w, role }) => ({ id: w.id, name: w.project.name, role, plan: effectivePlan(w), trialEndsAt: w.trialEndsAt, updatedAt: w.updatedAt })),
   });
 });
 
