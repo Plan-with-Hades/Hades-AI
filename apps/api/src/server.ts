@@ -1,3 +1,5 @@
+import dns from "node:dns";
+import net from "node:net";
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
@@ -21,6 +23,10 @@ import { allUsers, allWorkspaces, createWorkspace, getUser, initStore, recordVie
  * Hades API. Agents propose; this server enforces version checks, ownership, approval gating,
  * payment verification and channel signatures.
  */
+// Prefer IPv4 and give each address time: api.telegram.org timed out on Render's IPv6 path.
+dns.setDefaultResultOrder("ipv4first");
+net.setDefaultAutoSelectFamilyAttemptTimeout(1000);
+
 const app = express();
 app.set("trust proxy", true);
 const origins = (process.env.CORS_ORIGINS ?? "http://localhost:3000").split(",").map((s) => s.trim());

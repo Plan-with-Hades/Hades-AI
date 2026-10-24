@@ -19,7 +19,7 @@ export interface TelegramInbound {
 export type InboundHandler = (msg: TelegramInbound) => Promise<string | null>;
 
 async function call<T>(method: string, body: unknown): Promise<T> {
-  const res = await fetch(api(method), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch(api(method), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) });
   const json = (await res.json()) as { ok: boolean; result: T; description?: string };
   if (!json.ok) throw new Error(`Telegram ${method} failed: ${json.description}`);
   return json.result;
@@ -65,7 +65,7 @@ export function parseUpdate(update: any): TelegramInbound | null {
 /**
  * Registers the webhook when PUBLIC_API_URL is set, otherwise starts long polling.
  */
-export async function startTelegram(handler: InboundHandler) {
+async function setupTelegram(handler: InboundHandler) {
   if (!telegramEnabled()) {
     console.log("Telegram: TELEGRAM_BOT_TOKEN not set, channel disabled.");
     return;
@@ -80,6 +80,19 @@ export async function startTelegram(handler: InboundHandler) {
       allowed_updates: ["message", "edited_message"],
     });
     console.log(`Telegram: webhook set for @${username}`);
+    // Telegram forgets nothing, but a failed or replaced webhook would silence the bot: re-check every 10 minutes.
+    const expected = `${publicUrl.replace(/\/$/, "")}/api/channels/telegram/webhook`;
+    setInterval(async () => {
+      try {
+        const info = await call<{ url?: string }>("getWebhookInfo", {});
+        if (info.url !== expected) {
+          await call("setWebhook", { url: expected, secret_token: TELEGRAM_SECRET || undefined, allowed_updates: ["message", "edited_message"] });
+          console.log("Telegram: webhook restored");
+        }
+      } catch (e) {
+        console.error("Telegram webhook check failed:", (e as Error).message);
+      }
+    }, 10 * 60_000);
     return;
   }
   await call("deleteWebhook", { drop_pending_updates: false });
@@ -102,4 +115,22 @@ export async function startTelegram(handler: InboundHandler) {
     setImmediate(loop);
   };
   loop();
+}
+
+/** Starts the bot, retrying while the network is not ready (Render's first seconds after boot often time out). */
+export async function startTelegram(handler: InboundHandler) {
+  if (!telegramEnabled()) {
+    console.log("Telegram: TELEGRAM_BOT_TOKEN not set, channel disabled.");
+    return;
+  }
+  for (let attempt = 1; attempt <= 30; attempt++) {
+    try {
+      await setupTelegram(handler);
+      return;
+    } catch (e) {
+      console.error(`Telegram start attempt ${attempt} failed:`, (e as Error).message);
+      await new Promise((r) => setTimeout(r, Math.min(attempt * 3000, 30_000)));
+    }
+  }
+  console.error("Telegram could not start after 30 attempts.");
 }
