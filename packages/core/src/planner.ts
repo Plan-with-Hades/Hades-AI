@@ -349,7 +349,7 @@ export const AGENT_HELP = [
 
 const GOOGLE_URL = /https:\/\/docs\.google\.com\/(?:document|spreadsheets)\/d\/[\w-]+[^\s]*/i;
 
-export function runCommand(p: Project, raw: string, now = new Date()): CommandResult {
+export function runCommand(p: Project, raw: string, now = new Date(), opts: { maxTasks?: number } = {}): CommandResult {
   const text = raw.trim();
   const lower = text.toLowerCase();
   const url = text.match(GOOGLE_URL)?.[0];
@@ -406,12 +406,15 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
         } To start fresh instead, press Reset and ask again.`,
       };
     }
-    const project = generatePlan(p, { name, date, brief: text }, now);
+    let project = generatePlan(p, { name, date, brief: text }, now);
+    const full = project.tasks.length;
+    if (opts.maxTasks && full > opts.maxTasks) project = trimPlan(project, opts.maxTasks);
+    const trimmed = project.tasks.length < full;
     const sched = scheduleProject(project);
     return {
       project,
       intents: [],
-      reply: `Planned "${project.name}" for ${formatShort(project.deadline)}: ${project.tasks.length} tasks across ${project.members.length} people, chained by dependencies. ${
+      reply: `Planned "${project.name}" for ${formatShort(project.deadline)}: ${project.tasks.length} tasks across ${project.members.length} people, chained by dependencies.${trimmed ? ` The free plan holds ${opts.maxTasks} tasks, so I kept the essential ones (${full - project.tasks.length} optional steps left out; Pro lifts the cap).` : ""} ${
         sched.feasible ? `It fits, with ${sched.bufferDays} working day(s) to spare.` : `It's tight: the plan lands ${formatShort(sched.finishDate)}. Add people or trim scope.`
       }${project.members.length < 3 ? " Add your team (\"Add Meera as marketing\") and I'll reassign by role." : ""}`,
     };
@@ -636,6 +639,20 @@ export function findTaskByName(p: Project, phrase: string): { task?: Task; candi
   if (!scored.length) return { candidates: [] };
   const top = scored.filter((x) => x.score === scored[0].score && x.hits === scored[0].hits);
   return top.length === 1 ? { task: top[0].t, candidates: [] } : { candidates: top.slice(0, 4).map((x) => x.t) };
+}
+
+/** Shrinks a generated plan to fit a cap by dropping the least essential steps and reconnecting their neighbours. */
+export function trimPlan(p: Project, max: number): Project {
+  let out = p;
+  const rank = (t: Task) => ({ low: 0, medium: 1, high: 2, critical: 3 })[t.priority];
+  while (out.tasks.length > max) {
+    const victim = [...out.tasks]
+      .filter((t) => t.priority !== "critical" && !t.tags.includes("lead"))
+      .sort((a, b) => rank(a) - rank(b) || Number(b.id.replace(/\D/g, "")) - Number(a.id.replace(/\D/g, "")))[0];
+    if (!victim) break;
+    out = removeTask(out, victim.id);
+  }
+  return out;
 }
 
 /** After adding someone, hand them unstarted tasks that match their role better than the current owner. */

@@ -358,7 +358,7 @@ export function effectivePlan(w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "
 export const hasPro = (w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "proUntil">, now = new Date()) => effectivePlan(w, now) !== "expired";
 
 /** The free plan's caps. An event that grew past them during the trial stays readable but can't grow. */
-export const FREE_LIMITS = { events: 1, tasks: 10, people: 3 } as const;
+export const FREE_LIMITS = { events: 4, tasks: 10, people: 3 } as const;
 
 /** Why a change is blocked on the free plan, or null when it is allowed. */
 export function freeLimitMessage(before: { tasks: unknown[]; members: unknown[] }, after: { tasks: unknown[]; members: unknown[] }): string | null {
@@ -370,7 +370,7 @@ export function freeLimitMessage(before: { tasks: unknown[]; members: unknown[] 
 }
 
 export const FREE_FEATURES = [
-  `One event, up to ${FREE_LIMITS.tasks} tasks and ${FREE_LIMITS.people} people`,
+  `Up to ${FREE_LIMITS.events} events, each with ${FREE_LIMITS.tasks} tasks and ${FREE_LIMITS.people} people`,
   "Plan from a sentence, add people and tasks within those limits",
   "Mark tasks done and see dates re-plan",
   "Progress reports and teammate sign-in",

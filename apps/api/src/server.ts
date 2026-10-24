@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
-import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, FREE_FEATURES, freeLimitMessage, hasPro, PRO_DAYS, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
+import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, FREE_FEATURES, FREE_LIMITS, freeLimitMessage, hasPro, PRO_DAYS, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
 import { CALENDAR_SCOPE, completeGoogleLogin, currentUser, googleAuthUrl, googleEnabled, publicUser, requireUser, sessionFor, unseal, type OAuthState } from "./auth";
 import { syncCalendar } from "./google-calendar";
 import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agents";
@@ -101,7 +101,8 @@ app.post("/api/workspaces", (req, res) => {
   if (u) {
     const mine = workspacesOf(u).filter((x) => x.role === "manager").map((x) => x.w);
     best = mine.find((x) => effectivePlan(x) === "pro") ?? mine.find((x) => hasPro(x));
-    if (mine.length && !best) return res.status(402).json({ error: "The free plan includes one event. Upgrade to Hades Pro for unlimited events." });
+    if (mine.length >= FREE_LIMITS.events && !best) return res.status(402).json({ error: `The free plan includes up to ${FREE_LIMITS.events} events. Upgrade to Hades Pro for unlimited events.` });
+    best ??= mine[0]; // an expired account's new events share its (expired) plan, never a fresh trial
   }
   const created = createWorkspace(u ? { id: u.id, name: u.name, email: u.email } : undefined, { blank });
   // New events share the account's plan: Pro or the same trial, never a fresh trial.

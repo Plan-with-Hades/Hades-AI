@@ -1,4 +1,4 @@
-import { PRO_PRICE_INR, freeLimitMessage, addTask, formatProgress, hasPro, formatShort, progressReport, runCommand, updateTask, type AgentAction, type AgentTurn, type MemberMessage, type WorkspaceState } from "@hades/core";
+import { FREE_LIMITS, PRO_PRICE_INR, freeLimitMessage, addTask, formatProgress, hasPro, formatShort, progressReport, runCommand, updateTask, type AgentAction, type AgentTurn, type MemberMessage, type WorkspaceState } from "@hades/core";
 import { WORKSPACE_SCOPES } from "./auth";
 import { deliver } from "./agents";
 import { syncCalendar } from "./google-calendar";
@@ -28,7 +28,7 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
   const w = getWorkspace(workspaceId);
   const actor = user?.name ?? w.project.members[0].name;
   const userTurn: AgentTurn = { id: newId(8), at: new Date().toISOString(), role: "user", text: message, by: actor };
-  const cmd = runCommand(w.project, message);
+  const cmd = runCommand(w.project, message, new Date(), { maxTasks: hasPro(w) ? undefined : FREE_LIMITS.tasks });
   const role = w.ownerId ? roleIn(w, user) : "manager";
   if (role !== "manager" && !memberMayApply(w, user, cmd)) {
     const agentTurn: AgentTurn = {
