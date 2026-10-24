@@ -1,13 +1,18 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import pg from "pg";
 import { createDemoProject, TRIAL_DAYS, type ImpactReport, type WorkspaceState } from "@hades/core";
 
 /**
- * Workspaces live in memory and are flushed to a JSON file, so a restart keeps teams' projects.
- * Swap for Postgres when we outgrow one instance.
+ * Workspaces live in memory and are flushed after every change, so a restart keeps teams' projects.
+ * With DATABASE_URL the snapshot goes to Postgres (one JSONB row); otherwise to a JSON file in DATA_DIR.
  */
 const DATA_FILE = resolve(process.env.DATA_DIR ?? "./data", "workspaces.json");
+const DATABASE_URL = process.env.DATABASE_URL ?? "";
+const db = DATABASE_URL
+  ? new pg.Pool({ connectionString: DATABASE_URL, ssl: /sslmode=require|render\.com/.test(DATABASE_URL) ? { rejectUnauthorized: false } : undefined, max: 3 })
+  : null;
 
 export interface StoredUser {
   id: string; // Google "sub"
@@ -29,34 +34,49 @@ const users = new Map<string, StoredUser>();
 /** Analyses are kept until approved or replaced; they are not persisted. */
 const reports = new Map<string, ImpactReport>();
 
-function load() {
+function hydrate(data: Persisted, source: string) {
+  for (const [id, w] of Object.entries(data.workspaces ?? {})) {
+    // Migrate workspaces saved before trials existed.
+    if ((w.plan as string) === "free") w.plan = "trial";
+    w.trialEndsAt ??= new Date(Date.now() + TRIAL_DAYS * 864e5).toISOString();
+    w.ownerId ??= null;
+    workspaces.set(id, w);
+  }
+  for (const [id, u] of Object.entries(data.users ?? {})) users.set(id, u);
+  console.log(`Loaded ${workspaces.size} workspaces and ${users.size} users from ${source}`);
+}
+
+/** Loads the saved state. Call once before the server starts listening. */
+export async function initStore() {
   try {
-    if (!existsSync(DATA_FILE)) return;
-    const data = JSON.parse(readFileSync(DATA_FILE, "utf8")) as Persisted;
-    for (const [id, w] of Object.entries(data.workspaces ?? {})) {
-      // Migrate workspaces saved before trials existed.
-      if ((w.plan as string) === "free") w.plan = "trial";
-      w.trialEndsAt ??= new Date(Date.now() + TRIAL_DAYS * 864e5).toISOString();
-      w.ownerId ??= null;
-      workspaces.set(id, w);
+    if (db) {
+      await db.query("create table if not exists hades_state (id text primary key, data jsonb not null, updated_at timestamptz not null default now())");
+      const { rows } = await db.query<{ data: Persisted }>("select data from hades_state where id = 'main'");
+      if (rows[0]) hydrate(rows[0].data, "Postgres");
+      else console.log("Postgres connected, no saved state yet");
+      return;
     }
-    for (const [id, u] of Object.entries(data.users ?? {})) users.set(id, u);
-    console.log(`Loaded ${workspaces.size} workspaces and ${users.size} users from ${DATA_FILE}`);
+    if (existsSync(DATA_FILE)) hydrate(JSON.parse(readFileSync(DATA_FILE, "utf8")) as Persisted, DATA_FILE);
   } catch (e) {
     console.error("Could not load workspaces:", e);
+    if (db) throw e;
   }
 }
-load();
 
 let flushTimer: NodeJS.Timeout | null = null;
 function scheduleFlush() {
   if (flushTimer) return;
-  flushTimer = setTimeout(() => {
+  flushTimer = setTimeout(async () => {
     flushTimer = null;
+    const snapshot = JSON.stringify({ workspaces: Object.fromEntries(workspaces), users: Object.fromEntries(users) } satisfies Persisted);
     try {
+      if (db) {
+        await db.query("insert into hades_state (id, data, updated_at) values ('main', $1::jsonb, now()) on conflict (id) do update set data = excluded.data, updated_at = now()", [snapshot]);
+        return;
+      }
       mkdirSync(dirname(DATA_FILE), { recursive: true });
       const tmp = `${DATA_FILE}.tmp`;
-      writeFileSync(tmp, JSON.stringify({ workspaces: Object.fromEntries(workspaces), users: Object.fromEntries(users) } satisfies Persisted));
+      writeFileSync(tmp, snapshot);
       renameSync(tmp, DATA_FILE);
     } catch (e) {
       console.error("Could not save workspaces:", e);

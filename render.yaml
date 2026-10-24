@@ -1,26 +1,24 @@
 # Render Blueprint: New → Blueprint → pick this repo (branch with this file).
-# Creates the API (with a small persistent disk) and the web app.
+# Creates the API, the web app and a Postgres database (all free tier; switch plans to starter for always-on).
 # After the first deploy, fill the "sync: false" secrets in each service's Environment tab.
 services:
   - type: web
     name: hades-api
     runtime: node
-    plan: starter
+    plan: free
     region: singapore
-    buildCommand: npm ci && npm run build:api
+    buildCommand: npm ci --include=dev && npm run build:api
     startCommand: npm run start:api
     healthCheckPath: /health
-    disk:
-      name: hades-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
       - key: NODE_ENV
         value: production
-      - key: DATA_DIR
-        value: /var/data
+      - key: DATABASE_URL
+        fromDatabase:
+          name: hades-db
+          property: connectionString
       - key: CORS_ORIGINS
         value: "*"
       - key: WEB_URL
@@ -70,9 +68,9 @@ services:
   - type: web
     name: hades-web
     runtime: node
-    plan: starter
+    plan: free
     region: singapore
-    buildCommand: npm ci && npm run build:web
+    buildCommand: npm ci --include=dev && npm run build:web
     startCommand: npm run start --workspace @hades/web -- -p $PORT
     envVars:
       - key: NODE_VERSION
@@ -82,3 +80,10 @@ services:
           type: web
           name: hades-api
           property: host
+
+databases:
+  - name: hades-db
+    plan: free
+    region: singapore
+    databaseName: hades
+    user: hades

@@ -10,7 +10,7 @@ import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenti
 import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
 import { createPinelabsOrder, pinelabsConfigured, pinelabsMode, verifyPinelabsSignature } from "./payments/pinelabs";
-import { allUsers, allWorkspaces, createWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
+import { allUsers, allWorkspaces, createWorkspace, initStore, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
 
 /**
  * Hades API. Agents propose; this server enforces version checks, ownership, approval gating,
@@ -485,6 +485,7 @@ app.use((err: unknown, _req: express.Request, res: express.Response, _next: expr
 });
 
 const port = Number(process.env.PORT ?? 4000);
+await initStore();
 app.listen(port, () => {
   console.log(`Hades API on :${port} · payments: ${pinelabsMode()} · whatsapp: ${whatsappEnabled() ? "on" : "off"}`);
   startTelegram((m) => handleInbound("telegram", m.chatId, m.text, m.displayName)).catch((e) => console.error("Telegram start failed:", e));
