@@ -637,7 +637,14 @@ export function analyzeChange(project: Project, request: string, opts: AnalyzeOp
         acceptanceCriteria: [],
         tags: domains,
       },
-      dependencies: anchor ? graph.successors.get(anchor.id)!.slice(0, 1).map((to) => ({ from: id, to })) : [],
+      dependencies: (() => {
+        const viaAnchor = anchor ? graph.successors.get(anchor.id)!.slice(0, 1).map((to) => ({ from: id, to })) : [];
+        if (viaAnchor.length) return viaAnchor;
+        // No natural place: put it before the last open step so its days shift the dates after it.
+        const open = project.tasks.filter((t) => t.status !== "done");
+        const sink = [...open].reverse().find((t) => graph.successors.get(t.id)!.length === 0);
+        return sink ? [{ from: id, to: sink.id }] : [];
+      })(),
       recommended: true,
     });
   }

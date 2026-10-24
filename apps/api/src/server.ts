@@ -7,6 +7,7 @@ import { syncCalendar } from "./google-calendar";
 import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agents";
 import { speak, voiceEnabled } from "./voice/elevenlabs";
 import { runAgent } from "./hades-agent";
+import { emailApproval, emailUpdate } from "./notify";
 import { inviteMember } from "./invites";
 import { addMember, blankProject } from "@hades/core";
 import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
@@ -231,6 +232,7 @@ app.post(
     if (!report || report.projectId !== id) return res.status(404).json({ error: "This analysis has expired. Run it again." });
     const w = getWorkspace(id);
     requireActivePlan(w);
+    const beforeProject = w.project;
     const out = approveChanges(w.project, report, changeIds, w.project.members[0].name);
     for (const m of out.messages) {
       const note = report.review?.briefings.find((b) => b.memberId === m.memberId);
@@ -248,7 +250,9 @@ From the coordinator: ${note.text}`;
       x.reassessment = null;
     });
     await deliver(id, out.messages, ws);
-    res.json(view(getWorkspace(id)));
+    const chosen = report.changes.filter((c) => changeIds.includes(c.id)).map((c) => c.summary);
+    const emailed = await emailApproval(getWorkspace(id), currentUser(req), report, beforeProject, out.project, chosen).catch((e) => ({ sent: [] as string[], skipped: (e as Error).message, shifts: [] }));
+    res.json({ ...view(getWorkspace(id)), emailed: { sent: emailed.sent, skipped: emailed.skipped }, shifts: emailed.shifts });
   }),
 );
 
@@ -270,11 +274,12 @@ app.post(
   "/api/workspaces/:id/member-updates",
   h(async (req, res) => {
     const body = z
-      .object({ memberId: z.string(), taskId: z.string(), estimateDays: z.number().positive().max(60).optional(), note: z.string().trim().min(1).max(1000) })
+      .object({ memberId: z.string(), taskId: z.string(), estimateDays: z.number().positive().max(60).optional(), note: z.string().trim().max(1000).default("") })
       .parse(req.body);
     const id = param(req, "id");
     const w = getWorkspace(id);
-    const out = applyMemberUpdate(w.project, body);
+    const beforeProject = w.project;
+    const out = applyMemberUpdate(w.project, { ...body, note: body.note || "(no note)" });
     const lead = w.project.members[0].name;
     const ws = updateWorkspace(id, (x) => {
       x.project = out.project;
@@ -287,7 +292,8 @@ app.post(
     });
     const member = ws.project.members.find((m) => m.id === body.memberId);
     if (body.memberId !== ws.project.members[0].id) await alertLead(ws, `${member?.name} on ${body.taskId}: "${body.note}"\n${out.reassessment.headline}`);
-    res.json(view(ws));
+    const emailed = await emailUpdate(getWorkspace(id), currentUser(req), beforeProject, ws.project, body.taskId, body.note, out.reassessment.headline).catch((e) => ({ sent: [] as string[], skipped: (e as Error).message, shifts: [] }));
+    res.json({ ...view(ws), emailed: { sent: emailed.sent, skipped: emailed.skipped }, shifts: emailed.shifts });
   }),
 );
 

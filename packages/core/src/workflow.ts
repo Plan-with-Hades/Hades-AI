@@ -5,6 +5,31 @@ import type { AuditEvent, ImpactReport, MemberMessage, Project, ProposedChange, 
 
 const uid = (p: string) => `${p}-${Math.random().toString(36).slice(2, 9)}`;
 
+export interface DateShift {
+  taskId: string;
+  title: string;
+  ownerId: string;
+  /** Planned finish before (null for a new task) and after. */
+  from: string | null;
+  to: string;
+}
+
+/** Tasks whose planned dates moved between two versions of the plan (and tasks that are new). */
+export function scheduleDiff(before: Project, after: Project): DateShift[] {
+  const a = scheduleProject(before);
+  const b = scheduleProject(after);
+  const out: DateShift[] = [];
+  for (const t of after.tasks) {
+    if (t.status === "done") continue;
+    const y = b.tasks[t.id];
+    if (!y) continue;
+    const x = a.tasks[t.id];
+    if (!x) out.push({ taskId: t.id, title: t.title, ownerId: t.ownerId, from: null, to: y.endDate });
+    else if (x.endDate !== y.endDate || x.startDate !== y.startDate) out.push({ taskId: t.id, title: t.title, ownerId: t.ownerId, from: x.endDate, to: y.endDate });
+  }
+  return out;
+}
+
 export class StaleProposalError extends Error {
   constructor(public expected: number, public actual: number) {
     super(`The project changed since this analysis (v${expected} → v${actual}). Re-run the analysis before approving.`);

@@ -16,7 +16,7 @@ export const eventLink = (w: Pick<WorkspaceState, "id">) => `${WEB_URL}/app?w=${
 const b64url = (s: string) => Buffer.from(s).toString("base64url");
 const encodeHeader = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s).toString("base64")}?=`);
 
-async function sendGmail(manager: StoredUser, to: string, subject: string, html: string, text: string) {
+export async function sendGmail(manager: StoredUser, to: string, subject: string, html: string, text: string) {
   const token = await googleAccessToken(manager);
   const boundary = `hades-${newId(10)}`;
   const mime = [

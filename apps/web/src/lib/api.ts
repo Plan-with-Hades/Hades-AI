@@ -4,7 +4,13 @@ import type { AgentTurn, EffectivePlan, ImpactReport, PublicUser, WorkspaceState
 const RAW_API = (process.env.NEXT_PUBLIC_API_URL ?? "").trim();
 export const API_URL = (RAW_API && !/^https?:\/\//.test(RAW_API) ? `https://${RAW_API}` : RAW_API).replace(/\/$/, "");
 
-export type ServerWorkspace = WorkspaceState & { effectivePlan: EffectivePlan; role?: "manager" | "member" | "guest" };
+export type ServerWorkspace = WorkspaceState & {
+  effectivePlan: EffectivePlan;
+  role?: "manager" | "member" | "guest";
+  /** Present right after an approval or update: who was emailed, and which dates moved. */
+  emailed?: { sent: string[]; skipped?: string };
+  shifts?: { taskId: string; title: string; ownerId: string; from: string | null; to: string }[];
+};
 export interface InviteResult {
   memberId: string;
   email: string;

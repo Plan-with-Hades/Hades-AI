@@ -272,7 +272,10 @@ export function Console() {
         setReport(null);
         setPhase("idle");
         setRequest("");
-        flash(`Approved ${ids.length} change${ids.length === 1 ? "" : "s"}. ${briefed.length} teammates briefed${w.links.length ? " on their chats" : ""}.`);
+        setSelected(null);
+        flash(
+          `Approved ${ids.length} change${ids.length === 1 ? "" : "s"}. ${w.shifts?.length ? `${w.shifts.length} task date${w.shifts.length === 1 ? "" : "s"} moved on the graph. ` : ""}${emailSummary(w)}`,
+        );
         if (briefed[0]) setInboxMember(briefed[0].memberId);
       } catch (e) {
         fail(e);
@@ -324,13 +327,16 @@ export function Console() {
     flash("Rejected. The plan is unchanged.");
   };
 
+  const emailSummary = (w: ServerWorkspace) =>
+    w.emailed?.sent.length ? `Emailed ${w.emailed.sent.join(", ")}.` : w.emailed?.skipped ? w.emailed.skipped : "";
+
   const memberReply = async (memberId: string, taskId: string, estimate: number | undefined, note: string) => {
     if (!state) return;
     if (ws) {
       try {
         const w = await api.memberUpdate(ws.id, { memberId, taskId, estimateDays: estimate, note });
         applyServer(w);
-        if (w.reassessment) flash(w.reassessment.headline);
+        flash(`${w.reassessment?.headline ?? "Update sent."} ${emailSummary(w)}${w.shifts?.length ? ` ${w.shifts.length} date${w.shifts.length === 1 ? "" : "s"} moved.` : ""}`);
       } catch (e) {
         fail(e);
       }
@@ -1180,12 +1186,12 @@ function Inbox({
           className="space-y-2 rounded-xl border border-line bg-surface p-3"
           onSubmit={(e) => {
             e.preventDefault();
-            if (!taskId || !note.trim()) return;
+            if (!taskId) return;
             onReply(memberId, taskId, estimate ? Number(estimate) : undefined, note.trim());
             setNote("");
           }}
         >
-          <span className="label">Reply as {member.name}</span>
+          <span className="label">Update for {member.name}</span>
           <select id="inbox-task" value={taskId} onChange={(e) => setTaskId(e.target.value)} className="w-full rounded-lg border border-line-2 bg-bg-2 px-2.5 py-2 text-sm">
             {own.map((t) => (
               <option key={t.id} value={t.id}>
@@ -1197,7 +1203,7 @@ function Inbox({
             id="inbox-estimate"
             value={estimate}
             onChange={(e) => setEstimate(e.target.value.replace(/[^0-9.]/g, ""))}
-            placeholder="New estimate (days)"
+            placeholder="Days needed / remaining"
             className="w-full rounded-lg border border-line-2 bg-bg-2 px-2.5 py-2 text-sm"
           />
           <textarea
@@ -1205,7 +1211,7 @@ function Inbox({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}
-            placeholder="Blocker or update"
+            placeholder="Optional: describe the change or give orders. Real teammates get it by email."
             className="w-full resize-none rounded-lg border border-line-2 bg-bg-2 px-2.5 py-2 text-sm"
           />
           <button disabled={!own.length} className="w-full rounded-lg bg-text px-3 py-2 text-sm font-semibold text-bg disabled:opacity-40">
