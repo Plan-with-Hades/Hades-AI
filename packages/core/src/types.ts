@@ -90,7 +90,10 @@ export type ProposedChangeType =
   | "review_task"
   | "defer_task"
   | "add_dependency"
-  | "remove_dependency";
+  | "remove_dependency"
+  | "update_task";
+
+export type TaskPatch = Partial<Pick<Task, "title" | "description" | "status" | "estimateDays" | "priority">>;
 
 export interface ProposedChange {
   id: string;
@@ -106,6 +109,8 @@ export interface ProposedChange {
   dependencies?: Dependency[];
   estimateDays?: number;
   criteria?: string[];
+  /** Present for update_task. */
+  patch?: TaskPatch;
   /** Default decision suggested to the manager. */
   recommended: boolean;
 }

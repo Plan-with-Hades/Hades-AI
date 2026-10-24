@@ -25,6 +25,16 @@ const LEXICON: Record<string, string[]> = {
   test: ["test", "qa", "bug", "regression", "coverage"],
   release: ["release", "launch", "deploy", "ship", "go-live", "go live", "date", "deadline"],
   dashboard: ["dashboard", "analytics", "report", "chart"],
+  // Event management
+  sponsor: ["sponsor", "sponsors", "sponsorship", "funding", "budget", "funds"],
+  budget: ["budget", "money", "cost", "funds", "cheaper", "expensive"],
+  venue: ["venue", "auditorium", "hall", "ground", "location", "room", "estate office"],
+  guest: ["chief guest", "guest", "speaker", "keynote", "panel", "judge"],
+  marketing: ["poster", "posters", "creative", "creatives", "backdrop", "instagram", "social", "promo", "banner"],
+  registration: ["registration", "registrations", "ticket", "tickets", "pass", "passes", "signup"],
+  vendor: ["vendor", "vendors", "catering", "food", "caterer", "av", "sound", "lights", "stage"],
+  merch: ["merch", "t-shirt", "tshirt", "goodies", "swag"],
+  schedule: ["schedule", "run-of-show", "slot", "timing", "pm", "am"],
 };
 
 const STOP = new Set(["the", "and", "but", "for", "with", "that", "this", "cannot", "can't", "need", "needs", "want", "wants", "add", "client", "before", "after", "into", "from", "our", "we", "to", "a", "an", "of", "on", "in", "be", "it", "is", "so", "can"]);
@@ -45,9 +55,10 @@ export function detectDomains(text: string): string[] {
 }
 
 const wantsFixedDeadline = (text: string) =>
-  /(date|deadline|launch).{0,30}(cannot|can't|must not|won't|should not|fixed|same)|(cannot|can't|must not|don't).{0,20}(move|change|slip).{0,20}(date|deadline|launch)/i.test(text);
+  /(date|deadline|launch|fest|event).{0,30}(cannot|can't|must not|won't|should not|fixed|same)|(cannot|can't|must not|don't).{0,20}(move|change|slip).{0,20}(date|deadline|launch|fest|event)/i.test(text);
 
-const wantsDeferral = (text: string) => /\b(move|push|defer|drop|cut|postpone)\b.{0,40}\b(next release|later|v2|phase 2|after launch)\b/i.test(text);
+const wantsDeferral = (text: string) =>
+  /\b(move|push|defer|drop|cut|postpone|skip)\b.{0,40}\b(next release|later|v2|phase 2|after launch|this year|next year|next month|focus)\b/i.test(text);
 
 /** Scores how strongly a task relates to the request. Uses tags first, then title/description words. */
 function relevance(task: Task, domains: string[], words: string[]): number {
@@ -77,6 +88,191 @@ interface Ctx {
 }
 
 const TEMPLATES: Template[] = [
+  /* ---------------- Events ---------------- */
+  {
+    id: "sponsor-pullout",
+    test: (t) => /sponsor.{0,40}(pull|drop|back(ed)? out|withdr|cancel|left|exit)|(less|cut|reduc|lost).{0,20}(budget|funding)|budget.{0,20}(cut|less|reduc|short)/i.test(t),
+    interpretation: "A major source of funding is gone. Replace or cover the money without moving the event date.",
+    questions: [
+      "How much of the gap should new sponsors cover, and how much can paid passes cover?",
+      "Which spend is non-negotiable: AV, food, or speaker travel?",
+    ],
+    build: (p, c) => {
+      const sponsor = c.taskWith("sponsor");
+      const vendor = c.taskWith("vendor");
+      const reg = c.taskWith("registration");
+      const design = c.taskWith("marketing");
+      const out: ProposedChange[] = [];
+      if (sponsor) {
+        out.push({
+          id: `chg-upd-${sponsor.id}`,
+          type: "update_task",
+          agent: "scope",
+          summary: `Turn ${sponsor.id} into "Replace the title sponsor" (+1 day)`,
+          reason: `${sponsor.id} "${sponsor.title}" can no longer finish as planned. Pitching backup sponsors takes about a day more.`,
+          basis: "ai_inference",
+          taskId: sponsor.id,
+          patch: {
+            title: "Replace the title sponsor",
+            description: "Pitch three backup sponsors and close at least one before creatives go to print.",
+            estimateDays: (sponsor.estimateDays ?? 3) + 1,
+          },
+          recommended: true,
+        });
+      }
+      if (vendor) {
+        const id = c.nextId();
+        out.push({
+          id: `chg-${id}`,
+          type: "add_task",
+          agent: "scope",
+          summary: "Add task: re-quote vendors at the reduced budget",
+          reason: `${vendor.id} "${vendor.title}" was planned against the old budget.`,
+          basis: "ai_inference",
+          newTask: {
+            id,
+            title: "Re-quote vendors at the reduced budget",
+            description: "Ask AV and catering for a leaner package; keep safety-critical items.",
+            ownerId: vendor.ownerId,
+            status: "not_started",
+            priority: "high",
+            estimateDays: 1,
+            acceptanceCriteria: ["New quotes within the revised budget"],
+            tags: ["vendor", "budget"],
+          },
+          dependencies: [...(sponsor ? [{ from: sponsor.id, to: id }] : []), { from: id, to: vendor.id }],
+          recommended: true,
+        });
+      }
+      if (reg) {
+        out.push({
+          id: `chg-crit-${reg.id}`,
+          type: "append_criteria",
+          agent: "scope",
+          summary: `Sell paid passes with Pine Labs UPI in ${reg.id} (+1 day)`,
+          reason: `Paid passes can cover part of the gap, but ${reg.id} "${reg.title}" only planned free signups.`,
+          basis: "ai_inference",
+          taskId: reg.id,
+          criteria: ["Paid pass checkout via Pine Labs UPI", "Payment receipt on confirmation"],
+          estimateDays: (reg.estimateDays ?? 1) + 1,
+          recommended: true,
+        });
+      }
+      if (design) {
+        out.push({
+          id: `chg-crit-${design.id}`,
+          type: "append_criteria",
+          agent: "scope",
+          summary: `Remove the old sponsor from ${design.id} creatives`,
+          reason: `${design.id} "${design.title}" carries the old sponsor's logo.`,
+          basis: "ai_inference",
+          taskId: design.id,
+          criteria: ["Old sponsor logo removed", "Space reserved for the new sponsor"],
+          recommended: true,
+        });
+      }
+      return out;
+    },
+  },
+  {
+    id: "venue-change",
+    test: (t) => /(venue|auditorium|hall|ground|location).{0,60}(move|moved|chang|shift|instead|to the)|(moved|shifted|changed).{0,40}(venue|auditorium|hall|ground)/i.test(t),
+    interpretation: "The event moves to a different venue on the same date.",
+    questions: ["Is there a rain backup for an open-air venue?", "Does the new venue need a fresh permission or a power backup?"],
+    build: (p, c) => {
+      const approval = c.taskWith("approval");
+      const vendor = c.taskWith("vendor");
+      const design = c.taskWith("marketing");
+      const brief = c.taskWith("volunteers");
+      const out: ProposedChange[] = [];
+      const id = c.nextId();
+      out.push({
+        id: `chg-${id}`,
+        type: "add_task",
+        agent: "scope",
+        summary: "Add task: get permission and a rain plan for the new venue",
+        reason: approval ? `${approval.id} "${approval.title}" approved the old venue only.` : "The new venue has no approval yet.",
+        basis: "ai_inference",
+        newTask: {
+          id,
+          title: "Permission and rain plan for the new venue",
+          description: "Estate office sign-off, power backup and a covered fallback space.",
+          ownerId: approval?.ownerId ?? c.owner(/lead|manager/i),
+          status: "not_started",
+          priority: "high",
+          estimateDays: 1,
+          acceptanceCriteria: ["Written sign-off", "Rain fallback booked"],
+          tags: ["venue", "approval"],
+        },
+        dependencies: [...(vendor ? [{ from: id, to: vendor.id }] : []), ...(brief ? [{ from: id, to: brief.id }] : [])],
+        recommended: true,
+      });
+      if (vendor)
+        out.push({
+          id: `chg-crit-${vendor.id}`,
+          type: "append_criteria",
+          agent: "scope",
+          summary: `Re-plan AV and stage for the new venue in ${vendor.id} (+1 day)`,
+          reason: `${vendor.id} "${vendor.title}" was quoted for the old venue.`,
+          basis: "ai_inference",
+          taskId: vendor.id,
+          criteria: ["Outdoor-rated sound and lights", "Generator backup"],
+          estimateDays: (vendor.estimateDays ?? 1) + 1,
+          recommended: true,
+        });
+      if (design)
+        out.push({
+          id: `chg-crit-${design.id}`,
+          type: "append_criteria",
+          agent: "scope",
+          summary: `Update the venue on ${design.id} creatives`,
+          reason: `${design.id} "${design.title}" names the old venue.`,
+          basis: "ai_inference",
+          taskId: design.id,
+          criteria: ["New venue and map on every creative"],
+          recommended: true,
+        });
+      return out;
+    },
+  },
+  {
+    id: "guest-change",
+    test: (t) => /(chief guest|guest|speaker|keynote)/i.test(t),
+    interpretation: "The chief guest's slot or requirements changed.",
+    questions: ["Does the new slot clash with the hackathon results or the cultural night?"],
+    build: (p, c) => {
+      const brief = c.taskWith("volunteers");
+      const design = c.taskWith("marketing");
+      const out: ProposedChange[] = [];
+      if (brief)
+        out.push({
+          id: `chg-crit-${brief.id}`,
+          type: "append_criteria",
+          agent: "scope",
+          summary: `Rework the run-of-show around the new keynote slot in ${brief.id}`,
+          reason: `${brief.id} "${brief.title}" assumes the old keynote time.`,
+          basis: "ai_inference",
+          taskId: brief.id,
+          criteria: ["Keynote at the new slot", "Buffer before and after the keynote"],
+          recommended: true,
+        });
+      if (design)
+        out.push({
+          id: `chg-crit-${design.id}`,
+          type: "append_criteria",
+          agent: "scope",
+          summary: `Add the guest's foundation to the ${design.id} stage backdrop (+1 day)`,
+          reason: `${design.id} "${design.title}" doesn't include the guest's branding.`,
+          basis: "ai_inference",
+          taskId: design.id,
+          criteria: ["Foundation logo approved by the guest's office"],
+          estimateDays: (design.estimateDays ?? 1) + 1,
+          recommended: true,
+        });
+      return out;
+    },
+  },
+  /* ---------------- Software ---------------- */
   {
     id: "otp",
     test: (t) => /\b(otp|one[- ]time|2fa|mfa|two[- ]factor)\b/i.test(t),
@@ -226,6 +422,8 @@ export function applyChanges(project: Project, changes: ProposedChange[]): { tas
       tasks = tasks.map((t) => (t.id === ch.taskId ? { ...t, priority: "low", tags: [...t.tags, "deferred"], version: t.version + 1 } : t));
     } else if (ch.type === "add_dependency" && ch.dependencies) {
       dependencies.push(...ch.dependencies);
+    } else if (ch.type === "update_task" && ch.taskId && ch.patch) {
+      tasks = tasks.map((t) => (t.id === ch.taskId ? { ...t, ...ch.patch, version: t.version + 1 } : t));
     } else if (ch.type === "remove_dependency" && ch.dependencies) {
       const drop = new Set(ch.dependencies.map((d) => `${d.from}>${d.to}`));
       dependencies = dependencies.filter((d) => !drop.has(`${d.from}>${d.to}`));
@@ -282,19 +480,28 @@ function mitigations(project: Project, base: ProposedChange[], nextId: () => str
     });
   }
 
-  // 2. Contract-first: decouple a cross-owner hand-off on the critical path.
+  // 2. Overlap a cross-owner hand-off on the critical path (API contract, design placeholder, early booking).
+  const PARALLEL_OK = ["frontend", "integration", "design", "marketing", "vendor", "logistics"];
   for (const d of dependencies) {
     const a = byId.get(d.from);
     const b = byId.get(d.to);
     if (!a || !b || a.status === "done" || b.status === "done" || a.ownerId === b.ownerId) continue;
     if (!current.criticalPath.includes(a.id) || !current.criticalPath.includes(b.id)) continue;
-    if (!a.tags.includes("api") || !(b.tags.includes("frontend") || b.tags.includes("integration"))) continue;
+    if (!b.tags.some((t) => PARALLEL_OK.includes(t))) continue;
+    const api = a.tags.includes("api");
+    const design = b.tags.includes("design") || b.tags.includes("marketing");
     candidates.push({
-      id: `chg-contract-${a.id}-${b.id}`,
+      id: `chg-parallel-${a.id}-${b.id}`,
       type: "remove_dependency",
       agent: "timeline",
-      summary: `Agree the ${a.title.toLowerCase()} contract first so ${b.id} can start against a mock`,
-      reason: `${b.id} waits for ${a.id} to finish. With an agreed API contract the two can overlap.`,
+      summary: api
+        ? `Agree the ${a.title.toLowerCase()} contract first so ${b.id} can start against a mock`
+        : design
+          ? `Start ${b.id} "${b.title}" now with placeholders for ${a.id}`
+          : `Start ${b.id} "${b.title}" in parallel with ${a.id}`,
+      reason: api
+        ? `${b.id} waits for ${a.id} to finish. With an agreed API contract the two can overlap.`
+        : `${b.id} waits for ${a.id}, which sits on the critical path. ${design ? "Placeholders can be swapped once it lands." : "The two can overlap if the owners agree the inputs up front."}`,
       basis: "schedule",
       dependencies: [{ from: a.id, to: b.id }],
       taskId: b.id,
@@ -310,8 +517,8 @@ function mitigations(project: Project, base: ProposedChange[], nextId: () => str
       id: `chg-defer-${t.id}`,
       type: "defer_task",
       agent: "timeline",
-      summary: `Move ${t.id} "${t.title}" to the next release`,
-      reason: `${t.id} is ${t.priority} priority. Taking it off the launch path frees its owner.`,
+      summary: `Postpone ${t.id} "${t.title}" until after the deadline`,
+      reason: `${t.id} is ${t.priority} priority. Taking it off the critical path frees its owner.`,
       basis: "schedule",
       taskId: t.id,
       recommended: false,
@@ -387,7 +594,7 @@ export function analyzeChange(project: Project, request: string, opts: AnalyzeOp
     .map((t) => ({ t, s: relevance(t, domains, words) }))
     .filter((x) => x.s >= 3)
     .sort((a, b) => b.s - a.s);
-  const direct = scored.filter((x) => x.s >= 4 || x.t.tags.some((tag) => domains.includes(tag) && ["api", "auth", "payment"].includes(tag))).map((x) => x.t);
+  const direct = scored.filter((x) => x.s >= 4 || x.t.tags.some((tag) => domains.includes(tag) && ["api", "auth", "payment", "sponsor", "venue", "guest"].includes(tag))).map((x) => x.t);
   // Finished work is never "directly affected"; it becomes a review candidate instead.
   const directIds = [...new Set(direct.filter((t) => t.status !== "done").slice(0, 3).map((t) => t.id))];
   const doneMatches = direct.filter((t) => t.status === "done").map((t) => t.id);
@@ -401,8 +608,8 @@ export function analyzeChange(project: Project, request: string, opts: AnalyzeOp
         id: `chg-defer-${deferMatch.id}`,
         type: "defer_task",
         agent: "scope",
-        summary: `Move ${deferMatch.id} "${deferMatch.title}" to the next release`,
-        reason: "The request asks to take this work out of the launch.",
+        summary: `Drop ${deferMatch.id} "${deferMatch.title}" from this plan`,
+        reason: "The request asks to take this work out of the plan.",
         basis: "ai_inference",
         taskId: deferMatch.id,
         recommended: true,
@@ -473,7 +680,7 @@ export function analyzeChange(project: Project, request: string, opts: AnalyzeOp
   const afterGraph = buildGraph(after.tasks, after.dependencies);
   const seeds = [...directIds, ...newTaskIds];
   const downstream = downstreamOf(afterGraph, seeds).filter((id) => !newTaskIds.includes(id) && !directIds.includes(id));
-  const inferred = [...doneMatches, ...scopeChanges.flatMap((c) => c.reason.match(/\bT\d+\b/g) ?? [])].filter(
+  const inferred = [...doneMatches, ...scopeChanges.flatMap((c) => c.reason.match(/\b[A-Z]\d+\b/g) ?? [])].filter(
     (id) => byId.has(id) && !directIds.includes(id) && !downstream.includes(id),
   );
   const conflictFindings: Finding[] = [];
@@ -602,10 +809,10 @@ export function analyzeChange(project: Project, request: string, opts: AnalyzeOp
     verdict,
     headline:
       verdict === "slips"
-        ? `Launch slips to ${formatShort(withRec.finishDate)} even with the recommended plan.`
+        ? `The deadline slips to ${formatShort(withRec.finishDate)} even with the recommended plan.`
         : naive.feasible
-          ? `Launch holds on ${formatShort(project.deadline)}.`
-          : `Launch holds on ${formatShort(project.deadline)} if you approve the recommended plan.`,
+          ? `The deadline holds on ${formatShort(project.deadline)}.`
+          : `The deadline holds on ${formatShort(project.deadline)} if you approve the recommended plan.`,
   };
 
   const openQuestions = [

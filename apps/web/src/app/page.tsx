@@ -6,11 +6,11 @@ import { Logo } from "@/components/logo";
 const STEPS = [
   {
     t: "Say what changed",
-    d: "“Add OTP login, but the launch date can't move.” Type it, paste it from a client email, or send it on WhatsApp.",
+    d: "“Our title sponsor pulled out, but the fest date can't move.” Type it, forward it from an email, or send it on WhatsApp.",
   },
   {
     t: "Watch the ripple",
-    d: "Hades walks your dependency graph and lights up every task, owner and deadline the change touches. Facts from the graph are marked apart from AI guesses.",
+    d: "Hades walks your event plan and lights up every task, owner and deadline the change touches: posters, vendors, passes, run-of-show. Graph facts are marked apart from AI guesses.",
   },
   {
     t: "Agents argue it out",
@@ -55,7 +55,7 @@ export default function Home() {
           <div className="mb-10 flex flex-wrap items-center justify-between gap-3">
             <span className="label flex items-center gap-2">
               <span className="h-1.5 w-1.5 rounded-full bg-ember shadow-[0_0_12px_var(--ember)]" />
-              Agentic management platform
+              Hades AI · God of Event Management
             </span>
             <span className="label hidden sm:inline">AI Builders Day ’26 · Team A68</span>
           </div>
@@ -70,8 +70,9 @@ export default function Home() {
 
           <div className="mt-10 grid items-end gap-8 md:grid-cols-[1.2fr_1fr]">
             <p className="max-w-xl text-[17px] leading-relaxed text-muted">
-              Type a change. Hades traces every task, owner and deadline it touches, lets specialist agents plan the
-              response, and waits for your <span className="text-text">yes</span> before anything moves.
+              A sponsor pulls out. The venue moves. The chief guest wants a new slot. Hades traces every task, owner and
+              deadline the change touches, lets specialist agents plan the response, and waits for your{" "}
+              <span className="text-text">yes</span> before anything moves.
             </p>
             <div className="flex flex-wrap gap-3 md:justify-end">
               <Link
@@ -104,20 +105,21 @@ export default function Home() {
           <div>
             <span className="label">The problem</span>
             <h2 className="display mt-5 text-[clamp(28px,3.6vw,46px)] font-bold leading-[1.05]">
-              The manager is the human integration layer.
+              The event lead is the human integration layer.
             </h2>
           </div>
           <div className="space-y-6 text-[17px] leading-relaxed text-muted">
             <p>
-              A client changes one requirement. Someone now has to work out which tasks it touches, who owns them, what
-              else they were juggling, and whether the date still holds. Task trackers record that something changed.
-              They don&apos;t tell you what it <span className="text-text">does</span>.
+              Approvals, sponsors, posters, vendors, passes, volunteers: every part of an event leans on another. When one
+              thing changes, someone has to work out what it breaks, who to tell, and whether the date still holds.
+              Spreadsheets and group chats record that something changed. They don&apos;t tell you what it{" "}
+              <span className="text-text">does</span>.
             </p>
             <dl className="grid gap-px overflow-hidden rounded-2xl border border-line bg-line sm:grid-cols-3">
               {[
-                ["Ripple", "One change quietly hits five tasks."],
-                ["Chasing", "Updates live in chats, not the plan."],
-                ["Too late", "Slips surface the week of launch."],
+                ["Ripple", "A lost sponsor hits posters, vendors and passes."],
+                ["Chasing", "Updates live in WhatsApp groups, not the plan."],
+                ["Too late", "Clashes surface the night before the event."],
               ].map(([k, v]) => (
                 <div key={k} className="bg-bg-2 p-5">
                   <dt className="display text-sm font-bold text-text">{k}</dt>
@@ -134,7 +136,7 @@ export default function Home() {
         <div className="mx-auto max-w-6xl">
           <span className="label">How it works</span>
           <h2 className="display mt-5 max-w-3xl text-[clamp(28px,3.6vw,46px)] font-bold leading-[1.05]">
-            From “the client wants…” to an approved plan in under a minute.
+            From “the sponsor just called…” to an approved plan in under a minute.
           </h2>
           <ol className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-line bg-line md:grid-cols-4">
             {STEPS.map((s, i) => (
@@ -223,13 +225,13 @@ export default function Home() {
         <div className="relative mx-auto max-w-6xl overflow-hidden rounded-3xl border border-line-2 p-10 sm:p-14">
           <div aria-hidden className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-styx/20 blur-3xl" />
           <div aria-hidden className="absolute -bottom-32 -left-16 h-80 w-80 rounded-full bg-ember/15 blur-3xl" />
-          <span className="label relative">Building something today?</span>
+          <span className="label relative">Running an event soon?</span>
           <h2 className="display relative mt-5 max-w-3xl text-[clamp(26px,3.4vw,44px)] font-bold leading-[1.05]">
-            Every team in this room is juggling changes against a 19:30 deadline. Run yours on Hades.
+            College fests, meetups, hackathons, launches. If one change can break your plan, run it on Hades.
           </h2>
           <div className="relative mt-8 flex flex-wrap gap-3">
             <Link href="/app" className="rounded-full bg-text px-6 py-3.5 text-sm font-semibold text-bg transition hover:bg-styx-2">
-              Start your team’s project
+              Try it on a sample fest
             </Link>
           </div>
         </div>
@@ -270,8 +272,8 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-2.5">
             <Logo className="h-5 w-5" />
-            <span className="display text-sm font-bold">HADES</span>
-            <span className="label ml-2">God of the Backend</span>
+            <span className="display text-sm font-bold">HADES AI</span>
+            <span className="label ml-2">God of Event Management</span>
           </div>
           <span className="label">Built at AI Builders Day ’26 · Bengaluru</span>
         </div>

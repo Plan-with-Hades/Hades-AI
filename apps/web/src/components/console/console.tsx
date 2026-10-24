@@ -8,6 +8,7 @@ import {
   applyMemberUpdate,
   approveChanges,
   createDemoProject,
+  DEMO_REPLIES,
   formatShort,
   GOLDEN_REQUEST,
   SAMPLE_REQUESTS,
@@ -34,8 +35,9 @@ interface State {
   reassessment: Reassessment | null;
 }
 
-const STORAGE_KEY = "hades:demo:v1";
+const STORAGE_KEY = "hades:demo:v2";
 const uid = () => Math.random().toString(36).slice(2, 9);
+const lead = (p: Project) => p.members[0]?.name ?? "Manager";
 
 function freshState(): State {
   const project = createDemoProject();
@@ -45,7 +47,7 @@ function freshState(): State {
       {
         id: uid(),
         at: new Date().toISOString(),
-        actor: "Priya",
+        actor: lead(project),
         action: "project_created",
         summary: `Created "${project.name}" with ${project.tasks.length} tasks and ${project.members.length} people`,
         projectVersion: 1,
@@ -126,7 +128,7 @@ export function Console() {
           ...st,
           history: [
             ...st.history,
-            { id: uid(), at: new Date().toISOString(), actor: "Priya", action: "change_requested", summary: text, projectVersion: st.project.version },
+            { id: uid(), at: new Date().toISOString(), actor: lead(st.project), action: "change_requested", summary: text, projectVersion: st.project.version },
           ],
         },
       );
@@ -138,7 +140,7 @@ export function Console() {
     if (!state || !report) return;
     try {
       const ids = Object.entries(decisions).filter(([, v]) => v).map(([k]) => k);
-      const res = approveChanges(state.project, report, ids, "Priya");
+      const res = approveChanges(state.project, report, ids, lead(state.project));
       setState({
         ...state,
         project: res.project,
@@ -165,7 +167,7 @@ export function Console() {
     if (!state || !report) return;
     setState({
       ...state,
-      history: [...state.history, { id: uid(), at: new Date().toISOString(), actor: "Priya", action: "change_rejected", summary: `Rejected: ${report.request}`, projectVersion: state.project.version }],
+      history: [...state.history, { id: uid(), at: new Date().toISOString(), actor: lead(state.project), action: "change_rejected", summary: `Rejected: ${report.request}`, projectVersion: state.project.version }],
     });
     setReport(null);
     setPhase("idle");
@@ -183,7 +185,7 @@ export function Console() {
         messages: [
           ...state.messages,
           res.message,
-          { id: uid(), memberId, at: new Date().toISOString(), from: "agent", text: `Thanks. I've updated ${taskId} and told Priya: ${res.reassessment.headline}`, taskIds: [taskId] },
+          { id: uid(), memberId, at: new Date().toISOString(), from: "agent", text: `Thanks. I've updated ${taskId} and told ${lead(state.project)}: ${res.reassessment.headline}`, taskIds: [taskId] },
         ],
         reassessment: res.reassessment,
       });
@@ -247,7 +249,7 @@ export function Console() {
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
           <Link href="/" className="flex items-center gap-2">
             <Logo className="h-6 w-6" />
-            <span className="display text-sm font-bold">HADES</span>
+            <span className="display text-sm font-bold">HADES AI</span>
           </Link>
           <div className="flex min-w-0 items-center gap-3">
             <span className="h-4 w-px bg-line-2" />
@@ -330,7 +332,7 @@ export function Console() {
               value={request}
               onChange={(e) => setRequest(e.target.value)}
               rows={3}
-              placeholder="e.g. The client wants OTP login, but the launch date can't move."
+              placeholder="e.g. Our title sponsor pulled out, but the fest date can't move."
               className="mt-2 w-full resize-none rounded-xl border border-line-2 bg-surface px-3.5 py-3 text-sm leading-relaxed text-text outline-none transition placeholder:text-dim focus:border-styx"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) analyze(request);
@@ -559,8 +561,8 @@ function Feasibility({ report, chosen, project }: { report: ImpactReport; chosen
       </div>
       <p className="mt-3 text-[12.5px] leading-snug text-text">
         {live.bufferDays < 0
-          ? `With this selection the launch lands ${formatShort(live.finishDate)}, ${-live.bufferDays} working day${live.bufferDays === -1 ? "" : "s"} late.`
-          : `With this selection the launch lands ${formatShort(live.finishDate)}, on time.`}
+          ? `With this selection the plan lands ${formatShort(live.finishDate)}, ${-live.bufferDays} working day${live.bufferDays === -1 ? "" : "s"} late.`
+          : `With this selection the plan lands ${formatShort(live.finishDate)}, on time.`}
       </p>
     </div>
   );
@@ -656,11 +658,12 @@ function Inbox({
   const [note, setNote] = useState("");
   useEffect(() => {
     setTaskId(own[0]?.id ?? "");
-    const otp = own.find((t) => t.title.startsWith("Build OTP"));
-    if (otp) {
-      setTaskId(otp.id);
-      setEstimate("3");
-      setNote("OTP will take 3 days, not 2. I'm also fixing the payment API.");
+    // Pre-fill a realistic reply so anyone can play the teammate in one click.
+    const demo = DEMO_REPLIES[memberId];
+    if (demo && own.some((t) => t.id === demo.taskId)) {
+      setTaskId(demo.taskId);
+      setEstimate(demo.estimateDays != null ? String(demo.estimateDays) : "");
+      setNote(demo.note);
     } else {
       setEstimate("");
       setNote("");

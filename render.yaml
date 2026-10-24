@@ -1,0 +1,42 @@
+# Render Blueprint: New → Blueprint → pick this repo.
+# Creates the API and the web app. Add secrets in the Render dashboard after the first deploy.
+services:
+  - type: web
+    name: hades-api
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci && npm run build:api
+    startCommand: npm run start:api
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: PINELABS_CLIENT_ID
+        sync: false
+      - key: PINELABS_CLIENT_SECRET
+        sync: false
+      - key: PINELABS_MERCHANT_ID
+        sync: false
+      - key: AGENTICORG_WEBHOOK_SECRET
+        sync: false
+
+  - type: web
+    name: hades-web
+    runtime: node
+    plan: starter
+    region: singapore
+    buildCommand: npm ci && npm run build:web
+    startCommand: npm run start --workspace @hades/web -- -p $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: hades-api
+          envVarKey: RENDER_EXTERNAL_URL

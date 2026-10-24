@@ -7,7 +7,7 @@ export function SiteNav() {
       <nav className="glass flex w-full max-w-5xl items-center justify-between rounded-full py-2 pl-4 pr-2">
         <Link href="/" className="flex items-center gap-2.5" aria-label="Hades AI home">
           <Logo className="h-6 w-6" />
-          <span className="display text-[15px] font-bold tracking-tight">HADES</span>
+          <span className="display text-[15px] font-bold tracking-tight">HADES AI</span>
         </Link>
         <div className="hidden items-center gap-7 text-[13px] text-muted md:flex">
           <a href="#how" className="transition hover:text-text">How it works</a>

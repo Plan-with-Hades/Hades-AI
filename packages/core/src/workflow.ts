@@ -93,8 +93,12 @@ export function notifyMembers(project: Project, report: ImpactReport, approved: 
       const t = project.tasks.find((x) => x.id === c.taskId);
       if (!t) continue;
       if (c.type === "append_criteria") add(t.ownerId, t.id, `${t.id} "${t.title}" now also needs to cover: ${c.criteria?.join(", ")}.`);
-      if (c.type === "defer_task") add(t.ownerId, t.id, `${t.id} "${t.title}" moved to the next release. You can drop it for now.`);
-      if (c.type === "remove_dependency") add(t.ownerId, t.id, `You can start ${t.id} "${t.title}" against the agreed API contract instead of waiting.`);
+      if (c.type === "defer_task") add(t.ownerId, t.id, `${t.id} "${t.title}" is off this plan for now. You can pause it.`);
+      if (c.type === "remove_dependency") add(t.ownerId, t.id, `You can start ${t.id} "${t.title}" now instead of waiting for ${c.dependencies?.[0]?.from ?? "the earlier task"}. ${c.reason}`);
+      if (c.type === "update_task" && c.patch) {
+        const est = t.estimateDays == null ? "" : `, planned at ${t.estimateDays} day${t.estimateDays === 1 ? "" : "s"}`;
+        add(t.ownerId, t.id, `${t.id} is now "${t.title}"${est}. ${c.patch.description ?? ""} Does that timing work for you?`.replace(/\s+/g, " ").trim());
+      }
     }
   }
   for (const id of report.downstreamTaskIds) {
@@ -163,6 +167,6 @@ export function reassess(project: Project, before?: Schedule): Reassessment {
   const moved = before ? s.finishDay - before.finishDay : 0;
   const headline = s.feasible
     ? `Plan still lands ${formatShort(s.finishDate)}${moved > 0 ? `, ${moved} day${moved === 1 ? "" : "s"} later than before` : ""}. ${s.bufferDays} day${s.bufferDays === 1 ? "" : "s"} of buffer left.`
-    : `Launch now slips ${-s.bufferDays} working day${s.bufferDays === -1 ? "" : "s"} to ${formatShort(s.finishDate)}. ${suggestions.length ? `${suggestions.length} way${suggestions.length === 1 ? "" : "s"} to recover found.` : "No automatic fix found; scope needs to move."}`;
+    : `The deadline now slips ${-s.bufferDays} working day${s.bufferDays === -1 ? "" : "s"} to ${formatShort(s.finishDate)}. ${suggestions.length ? `${suggestions.length} way${suggestions.length === 1 ? "" : "s"} to recover found.` : "No automatic fix found; scope needs to move."}`;
   return { schedule: s, suggestions, headline };
 }

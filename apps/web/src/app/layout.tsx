@@ -7,11 +7,11 @@ const manrope = Manrope({ variable: "--font-manrope", subsets: ["latin"] });
 const jetbrains = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin"], weight: ["400", "500"] });
 
 export const metadata: Metadata = {
-  title: "Hades AI · God of the Backend",
+  title: "Hades AI · God of Event Management",
   description:
-    "An agentic management platform. Type a change, and Hades traces every task, owner and deadline it touches, lets specialist agents plan the response, and waits for your approval.",
+    "AI event management that sees the ripple of every change. A sponsor pulls out or the venue moves: Hades traces every task, owner and deadline it touches, plans the response with specialist agents, and waits for your approval.",
   openGraph: {
-    title: "Hades AI · God of the Backend",
+    title: "Hades AI · God of Event Management",
     description: "Every change has a ripple. Hades sees it before it hits.",
   },
 };
