@@ -21,11 +21,9 @@ services:
           property: connectionString
       - key: CORS_ORIGINS
         value: "*"
+      # Pinned URLs: a fromService host is empty when both services build at the same time.
       - key: WEB_URL
-        fromService:
-          type: web
-          name: hades-web
-          property: host
+        value: https://hades-web-0k1k.onrender.com
       - key: SESSION_SECRET
         generateValue: true
       - key: ADMIN_KEY
@@ -76,10 +74,7 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: NEXT_PUBLIC_API_URL
-        fromService:
-          type: web
-          name: hades-api
-          property: host
+        value: https://hades-api-zt6n.onrender.com
 
 databases:
   - name: hades-db
