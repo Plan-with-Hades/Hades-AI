@@ -100,6 +100,13 @@ function hydrate(data: Persisted, source: string) {
     if ((w.plan as string) === "free") w.plan = "trial";
     w.trialEndsAt ??= new Date(Date.now() + TRIAL_DAYS * 864e5).toISOString();
     w.ownerId ??= null;
+    // Old demo-based events: the owner is the lead, not the demo's "Ananya".
+    const lead = w.project.members[0];
+    if (w.ownerName && lead?.id === "ananya" && lead.name === "Ananya") {
+      lead.name = w.ownerName;
+      lead.initials = w.ownerName.split(/\s+/).map((x) => x[0]).join("").slice(0, 2).toUpperCase() || "EL";
+      repaired = true;
+    }
     // One-time repair: plan items an older parser saved as teammates go back on the graph as tasks.
     const fix = repairMisreadMembers(w.project);
     if (fix.fixed.length) {
