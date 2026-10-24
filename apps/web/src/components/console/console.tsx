@@ -1572,7 +1572,7 @@ function ConnectModal({
   };
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
-      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-line-2 bg-surface p-6" onClick={(e) => e.stopPropagation()}>
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto overflow-x-hidden rounded-2xl border border-line-2 bg-surface p-6" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <span className="label">Team</span>
@@ -1592,16 +1592,16 @@ function ConnectModal({
           <>
             {canInvite ? (
               <form
-                className="mt-5 grid gap-2 rounded-xl border border-line bg-bg-2 p-3 sm:grid-cols-[1fr_1fr_1.4fr_auto]"
+                className="mt-5 grid gap-2 rounded-xl border border-line bg-bg-2 p-3 sm:grid-cols-2"
                 onSubmit={(e) => {
                   e.preventDefault();
                   add();
                 }}
               >
-                <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" className="rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
-                <input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="Role (e.g. Marketing)" className="rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
-                <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="Google email" className="rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
-                <button disabled={sending} className="rounded-lg bg-text px-4 py-2 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-50">
+                <input required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="Name" className="min-w-0 rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
+                <input value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} placeholder="Role (e.g. Marketing)" className="min-w-0 rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
+                <input required type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} placeholder="Google email" className="min-w-0 rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
+                <button disabled={sending} className="whitespace-nowrap rounded-lg bg-text px-4 py-2 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-50">
                   {sending ? "Inviting…" : "Add & invite"}
                 </button>
               </form>

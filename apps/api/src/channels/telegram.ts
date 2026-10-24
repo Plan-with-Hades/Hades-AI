@@ -40,6 +40,7 @@ export async function telegramBotUsername(): Promise<string | null> {
 }
 
 export async function sendTelegram(chatId: string, text: string): Promise<void> {
+  console.log(`Telegram: replying to ${chatId}`);
   if (!telegramEnabled()) return;
   // Telegram caps messages at 4096 characters.
   await call("sendMessage", { chat_id: chatId, text: text.slice(0, 4000), disable_web_page_preview: true });
@@ -135,4 +136,9 @@ export async function startTelegram(handler: InboundHandler) {
     }
   }
   console.error("Telegram could not start after 30 attempts.");
+}
+
+export async function telegramWebhookInfo() {
+  if (!telegramEnabled()) return { enabled: false };
+  return call<Record<string, unknown>>("getWebhookInfo", {});
 }

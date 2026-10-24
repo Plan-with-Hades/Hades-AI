@@ -14,7 +14,7 @@ import { inviteMember } from "./invites";
 import { addMember, blankProject, progressReport, updateTask } from "@hades/core";
 import { syncTracker } from "./google-workspace";
 import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
-import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
+import { parseUpdate, startTelegram, telegramWebhookInfo, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
 import { createPinelabsOrder, getPinelabsOrder, isPaidStatus, pinelabsConfigured, pinelabsMode, verifyPinelabsRedirect } from "./payments/pinelabs";
 import { allUsers, allWorkspaces, createWorkspace, getUser, initStore, recordView, trafficSummary, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
@@ -602,7 +602,11 @@ app.all(
 app.post(
   "/api/channels/telegram/webhook",
   h(async (req, res) => {
-    if (TELEGRAM_SECRET && req.get("X-Telegram-Bot-Api-Secret-Token") !== TELEGRAM_SECRET) return res.sendStatus(401);
+    if (TELEGRAM_SECRET && req.get("X-Telegram-Bot-Api-Secret-Token") !== TELEGRAM_SECRET) {
+      console.warn("Telegram webhook: rejected a request with a wrong secret");
+      return res.sendStatus(401);
+    }
+    console.log("Telegram webhook: update received");
     const msg = parseUpdate(req.body);
     res.sendStatus(200); // ack fast; Telegram retries slow webhooks
     if (!msg) return;
@@ -694,6 +698,15 @@ app.post(
 );
 
 /* ---------------- Traction proof: timestamped signups, payments, agent activity ---------------- */
+
+/** Admin: what Telegram says about our webhook (last delivery error, pending updates). */
+app.get(
+  "/api/admin/telegram",
+  h(async (req, res) => {
+    if (!ADMIN_KEY || (req.query.key !== ADMIN_KEY && req.get("x-admin-key") !== ADMIN_KEY)) return res.sendStatus(404);
+    res.json(await telegramWebhookInfo());
+  }),
+);
 
 app.get("/api/admin/stats", (req, res) => {
   if (!ADMIN_KEY || (req.query.key !== ADMIN_KEY && req.get("x-admin-key") !== ADMIN_KEY)) return res.sendStatus(404);
