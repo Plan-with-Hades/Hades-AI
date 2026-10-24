@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { RippleField } from "@/components/ripple-field";
+import { VideoBackground } from "@/components/video-bg";
 import { SiteNav } from "@/components/site-nav";
 import { Logo } from "@/components/logo";
 
@@ -41,23 +41,12 @@ export default function Home() {
   return (
     <main className="relative isolate overflow-x-clip">
       {/* One live video behind the whole page; sections sit on a dark scrim and frosted cards. */}
-      <video
-        aria-hidden
-        className="pointer-events-none fixed inset-0 -z-20 h-full w-full object-cover motion-reduce:hidden"
-        src="/video/hero.mp4"
-        poster="/video/hero-poster.jpg"
-        autoPlay
-        loop
-        muted
-        playsInline
-        preload="auto"
-      />
+      <VideoBackground src="/video/hero.mp4" poster="/video/hero-poster.jpg" />
       <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 bg-bg/55" />
       <SiteNav />
 
       {/* ---------------- Hero ---------------- */}
       <section className="grain relative isolate flex min-h-[92svh] flex-col justify-end px-5 pb-10 pt-32 sm:px-8">
-        <RippleField className="absolute inset-0 -z-10 opacity-80" />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_50%_35%,transparent_0%,rgba(6,7,10,0.55)_80%)]"
@@ -104,9 +93,8 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-14 flex items-center justify-between border-t border-line pt-4">
+          <div className="mt-14 flex items-center border-t border-line pt-4">
             <span className="label">Scope · Conflict · Timeline · Members</span>
-            <span className="label">Move to disturb the graph ↗</span>
           </div>
         </div>
       </section>
