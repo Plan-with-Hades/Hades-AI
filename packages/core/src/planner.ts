@@ -140,6 +140,12 @@ const EXTRA: Record<string, Step[]> = {
     { key: "decor", title: "Finalise decor and photographer", days: 3, domain: "venue", after: ["venue"] },
     { key: "invites", title: "Send invitations and track RSVPs", days: 4, domain: "registration", after: ["approve"] },
   ],
+  party: [
+    { key: "guests", title: "Build the guest list and send invites", days: 2, domain: "registration", after: ["approve"] },
+    { key: "food", title: "Order cake, food and drinks", days: 3, domain: "venue", after: ["venue"] },
+    { key: "decor", title: "Arrange decor, music and games", days: 3, domain: "content", after: ["venue"] },
+    { key: "surprise", title: "Plan the surprise moment and the photographer", days: 2, domain: "marketing", after: ["guests"] },
+  ],
   fest: [
     { key: "competitions", title: "Plan competitions and the cultural night", days: 4, domain: "content", after: ["approve"] },
     { key: "merch", title: "Order fest merch and goodies", days: 3, domain: "marketing", after: ["sponsor", "brand"] },
@@ -154,6 +160,7 @@ const EVENT_WORDS: [RegExp, string][] = [
   [/hackathon|hack day|buildathon/i, "hackathon"],
   [/conference|summit|symposium|meetup|workshop/i, "conference"],
   [/wedding|reception|marriage|sangeet/i, "wedding"],
+  [/birthday|party|anniversary|farewell|reunion|celebration|baby shower/i, "party"],
   [/fest|festival|cultural|college/i, "fest"],
   [/launch|product|demo day/i, "launch"],
 ];
@@ -231,6 +238,17 @@ export function generatePlan(p: Project, input: { name?: string; date?: string |
   // No date given: set the event day two working days after the plan realistically finishes, so it fits.
   if (!(input.date && input.date > today)) planned = { ...planned, deadline: addWorkingDays(scheduleProject(planned).finishDate, 2) };
   return planned;
+}
+
+/** Plans a whole new event and adds it to the current graph as its own cluster of linked tasks. */
+export function mergePlan(p: Project, input: { name: string; date?: string | null; brief?: string }, now = new Date()): Project {
+  const sub = generatePlan({ ...p, tasks: [], dependencies: [] }, input, now);
+  const start = Math.max(0, ...p.tasks.map((t) => Number(t.id.replace(/\D/g, "")) || 0));
+  const ids = new Map(sub.tasks.map((t, i) => [t.id, `T${start + i + 1}`]));
+  const tasks = sub.tasks.map((t) => ({ ...t, id: ids.get(t.id)!, title: `${input.name}: ${t.title}` }));
+  const dependencies = sub.dependencies.map((d) => ({ from: ids.get(d.from)!, to: ids.get(d.to)! }));
+  const deadline = sub.deadline > p.deadline ? sub.deadline : p.deadline;
+  return bump(p, { tasks: [...p.tasks, ...tasks], dependencies: [...p.dependencies, ...dependencies], deadline });
 }
 
 /* ---------------- Progress tracker ---------------- */
@@ -360,17 +378,34 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
     return { reply: formatProgress(p, progressReport(p, now)), intents: [] };
   }
 
-  // New event plan
-  // Whole-event planning: "plan/organise/set up …", or "create/start …" on an empty event. Never "add".
-  const planVerb = p.tasks.length ? /^(?:plan|organi[sz]e|set up)\s+(?:(?:a|an|the|our|my)\s+)?(.+)$/i : /^(?:plan|organi[sz]e|set up|create|new|start)\s+(?:(?:a|an|the|our|my)\s+)?(.+)$/i;
-  const planMatch = /(called|named)/i.test(text) && p.tasks.length ? null : text.match(planVerb);
-  if (planMatch && /\b(event|fest|festival|conference|summit|hackathon|meetup|workshop|wedding|launch|party|day|night|expo|match|tournament|concert)\b/i.test(planMatch[1])) {
+  // New event plan: a whole plan from one sentence. "add …" never plans; "called X" on an existing plan adds one item.
+  const EVENT_NOUN = /\b(event|fest|festival|conference|summit|hackathon|meetup|workshop|wedding|launch|party|birthday|anniversary|farewell|reunion|celebration|ceremony|expo|match|tournament|concert|night|day)\b/i;
+  const planMatch = text.match(/^(?:please\s+)?(?:plan|organi[sz]e|arrange|throw|host|set up|create|make|start|new|build|generate)\s+(?:(?:a|an|the|our|my|me)\s+)?(.+)$/i);
+  const isItem = /\b(task|activity|session|step|todo|milestone|reminder)\b/i.test(text) || (/\b(called|named)\b/i.test(text) && p.tasks.length > 0);
+  if (planMatch && !isItem && EVENT_NOUN.test(planMatch[1])) {
     const date = parseDate(text, now);
-    const name = planMatch[1]
-      .replace(/^(?:event|party|function|celebration)?\s*(?:to|for)\s+(?:organi[sz]e|plan|host|run|throw|arrange|do|manage)\s+(?:(?:a|an|the|our|my)\s+)?/i, "")
-      .replace(/\b(on|for|by|in|at)\b.*$/i, "")
+    let name = planMatch[1].replace(/^(?:full\s+)?(?:plan\s+)?(?:for\s+)?/i, "").trim();
+    const forEvent = name.match(/^(?:event|party|function|celebration)\s+(?:for|of)\s+(.+)$/i);
+    if (forEvent) name = forEvent[1];
+    name = name
+      .replace(/^(?:to\s+)?(?:organi[sz]e|plan|host|run|throw|arrange|do|manage)\s+(?:(?:a|an|the|our|my)\s+)?/i, "")
+      .replace(/\s+for\s+\d+.*$/i, "")
+      .replace(/\s+(?:on|by|in|at)\s+.*$/i, "")
       .trim()
       .replace(/^\w/, (c) => c.toUpperCase());
+    if (!name) name = "New event";
+    if (p.tasks.length) {
+      const project = mergePlan(p, { name, date, brief: text }, now);
+      const added = project.tasks.length - p.tasks.length;
+      const sched = scheduleProject(project);
+      return {
+        project,
+        intents: [],
+        reply: `Planned "${name}" and added its ${added} tasks to the graph, owners assigned by role. ${
+          sched.feasible ? `The event date still holds${sched.bufferDays > 0 ? ` with ${sched.bufferDays} day(s) to spare` : ""}.` : `The plan now lands ${formatShort(sched.finishDate)}, after the event date.`
+        } To start fresh instead, press Reset and ask again.`,
+      };
+    }
     const project = generatePlan(p, { name, date, brief: text }, now);
     const sched = scheduleProject(project);
     return {
