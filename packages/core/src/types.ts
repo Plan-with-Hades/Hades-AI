@@ -232,10 +232,12 @@ export interface MemberLink {
 
 export interface PaymentRecord {
   id: string;
-  provider: "pinelabs" | "simulated";
+  provider: "pinelabs" | "simulated" | "upi";
+  /** UPI transaction reference (UTR) the payer entered, for Google Pay / UPI payments. */
+  utr?: string;
   orderId: string;
   amountPaise: number;
-  status: "created" | "authorized" | "captured" | "failed";
+  status: "created" | "pending" | "authorized" | "captured" | "failed";
   checkoutUrl: string;
   createdAt: string;
   updatedAt: string;

@@ -15,12 +15,13 @@ export interface InviteResult {
 }
 
 export interface Meta {
-  payments: { mode: "live" | "test" | "simulated"; pricePaise: number; trialDays: number };
+  payments: { mode: "live" | "test" | "off"; pricePaise: number; trialDays: number };
   google: { enabled: boolean };
   telegram: { enabled: boolean; bot: string | null };
   whatsapp: { enabled: boolean; number: string | null };
   agenticorg?: { enabled: boolean };
   voice?: { enabled: boolean };
+  upi?: { vpa: string; name: string } | null;
 }
 
 export interface Me {
@@ -97,6 +98,7 @@ export const api = {
     post<{ invite: InviteResult; workspace: ServerWorkspace }>(`/api/workspaces/${id}/members`, body),
   invite: (id: string, memberId: string) => post<{ invite: InviteResult; workspace: ServerWorkspace }>(`/api/workspaces/${id}/members/${memberId}/invite`),
   reset: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/reset`),
+  payUpi: (id: string, utr: string) => post<ServerWorkspace>(`/api/workspaces/${id}/upi`, { utr }),
   checkout: (id: string) => post<{ checkoutUrl: string; mode: string }>(`/api/workspaces/${id}/checkout`),
   syncCalendar: (id: string) => post<{ created: number; updated: number; workspace: ServerWorkspace }>(`/api/workspaces/${id}/calendar/sync`),
   signInUrl: (opts: { workspaceId?: string; calendar?: boolean; workspace?: boolean }) => {

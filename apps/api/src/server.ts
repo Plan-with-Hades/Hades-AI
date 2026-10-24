@@ -13,7 +13,7 @@ import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenti
 import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
 import { createPinelabsOrder, getPinelabsOrder, isPaidStatus, pinelabsConfigured, pinelabsMode, verifyPinelabsRedirect } from "./payments/pinelabs";
-import { allUsers, allWorkspaces, createWorkspace, initStore, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
+import { allUsers, allWorkspaces, createWorkspace, initStore, recordView, trafficSummary, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
 
 /**
  * Hades API. Agents propose; this server enforces version checks, ownership, approval gating,
@@ -44,6 +44,9 @@ const PUBLIC_API_URL = asUrl(process.env.PUBLIC_API_URL ?? process.env.RENDER_EX
 const PRO_PRICE_PAISE = Number(process.env.PRO_PRICE_PAISE ?? PRO_PRICE_INR * 100);
 const GOOGLE_REDIRECT = process.env.GOOGLE_REDIRECT_URI ?? `${PUBLIC_API_URL}/api/auth/google/callback`;
 const ADMIN_KEY = process.env.ADMIN_KEY ?? "";
+/** Google Pay / any UPI app pays straight to this UPI ID. Payments are confirmed by the admin in /dev. */
+const UPI_VPA = (process.env.UPI_VPA ?? "").trim();
+const UPI_NAME = (process.env.UPI_PAYEE_NAME ?? "Hades AI").trim();
 const DEV_CHANNEL = process.env.ALLOW_DEV_CHANNEL === "1" || process.env.NODE_ENV !== "production";
 
 type Handler = (req: express.Request, res: express.Response) => unknown | Promise<unknown>;
@@ -64,6 +67,7 @@ app.get(
       whatsapp: { enabled: whatsappEnabled(), number: WHATSAPP_FROM.replace(/^whatsapp:/, "") || null },
       agenticorg: { enabled: agenticorgEnabled() },
       voice: { enabled: voiceEnabled() },
+      upi: UPI_VPA ? { vpa: UPI_VPA, name: UPI_NAME } : null,
     });
   }),
 );
@@ -302,6 +306,48 @@ app.post(
   }),
 );
 
+/* ---------------- Analytics: page views and unique visitors ---------------- */
+
+app.post("/api/track", (req, res) => {
+  const b = z.object({ visitorId: z.string().min(6).max(64), path: z.string().max(300), referrer: z.string().max(500).optional() }).safeParse(req.body);
+  if (b.success && !/bot|crawl|spider|preview/i.test(req.get("user-agent") ?? "")) recordView(b.data);
+  res.sendStatus(204);
+});
+
+/* ---------------- Payments: Google Pay (UPI) ---------------- */
+
+/** The payer paid ₹599 to our UPI ID in Google Pay and gives us the UPI reference. Pro turns on once verified in /dev. */
+app.post(
+  "/api/workspaces/:id/upi",
+  h((req, res) => {
+    if (!UPI_VPA) return res.status(503).json({ error: "Google Pay isn't set up yet." });
+    const { utr } = z.object({ utr: z.string().trim().regex(/^[A-Za-z0-9]{10,24}$/, "Enter the 12-digit UPI reference (UTR) from Google Pay") }).parse(req.body);
+    const id = param(req, "id");
+    const w = getWorkspace(id);
+    if (w.payments.some((p) => p.utr === utr)) return res.status(409).json({ error: "We already have this payment. It will be confirmed shortly." });
+    const now = new Date().toISOString();
+    const ref = `upi-${id}-${Date.now()}`;
+    const ws = updateWorkspace(id, (x) => {
+      x.payments.push({ id: ref, provider: "upi", orderId: ref, amountPaise: PRO_PRICE_PAISE, status: "pending", checkoutUrl: "", utr, createdAt: now, updatedAt: now });
+      x.history.push({ id: newId(8), at: now, actor: currentUser(req)?.name ?? "team", action: "payment", summary: `Google Pay payment submitted (UTR ${utr}), awaiting confirmation`, projectVersion: x.project.version });
+    });
+    res.status(201).json(view(ws));
+  }),
+);
+
+/** Admin confirms (or rejects) a Google Pay payment after checking it arrived. */
+app.post(
+  "/api/admin/payments/:ref/:decision",
+  h((req, res) => {
+    if (!ADMIN_KEY || req.get("x-admin-key") !== ADMIN_KEY) return res.sendStatus(404);
+    const ref = param(req, "ref");
+    const ok = param(req, "decision") === "verify";
+    const ws = markPaid(ref, ok ? "captured" : "failed");
+    if (!ws) return res.status(404).json({ error: "Unknown payment" });
+    res.json({ ok: true });
+  }),
+);
+
 /* ---------------- Payments: Pine Labs hosted checkout ---------------- */
 
 app.post(
@@ -326,11 +372,7 @@ app.post(
       );
       return res.status(201).json({ checkoutUrl: order.checkoutUrl, mode: pinelabsMode() });
     }
-    const checkoutUrl = `${PUBLIC_API_URL}/api/payments/simulated/${reference}`;
-    updateWorkspace(id, (x) =>
-      x.payments.push({ id: reference, provider: "simulated", orderId: reference, amountPaise: PRO_PRICE_PAISE, status: "created", checkoutUrl, createdAt: now, updatedAt: now }),
-    );
-    res.status(201).json({ checkoutUrl, mode: "simulated" });
+    res.status(503).json({ error: "Card and netbanking checkout isn't live yet. Pay with Google Pay (UPI) instead." });
   }),
 );
 
@@ -352,7 +394,7 @@ function markPaid(orderId: string, status: "authorized" | "captured" | "failed")
       at: p.updatedAt,
       actor: "pine-labs",
       action: "payment",
-      summary: status === "failed" ? `Payment failed for order ${orderId}` : `Paid ₹${(p.amountPaise / 100).toFixed(0)} for Pro via ${p.provider === "pinelabs" ? "Pine Labs" : "simulated checkout"} (${orderId})`,
+      summary: status === "failed" ? `Payment failed for order ${orderId}` : `Paid ₹${(p.amountPaise / 100).toFixed(0)} for Pro via ${p.provider === "pinelabs" ? "Pine Labs" : "Google Pay (UPI)"} (${orderId})`,
       projectVersion: x.project.version,
     });
   });
@@ -407,37 +449,6 @@ app.all(
     const orderId = p.order_id ?? p.orderId;
     const ws = orderId ? markPaid(orderId, "failed") : null;
     res.redirect(`${WEB_URL}/app${ws ? `?w=${ws.id}&paid=0` : "?paid=0"}`);
-  }),
-);
-
-/** Simulated checkout page, used only when Pine Labs credentials are not configured. */
-app.get(
-  "/api/payments/simulated/:ref",
-  h((req, res) => {
-    const ref = param(req, "ref");
-    const hit = findPayment(ref);
-    if (!hit) return res.status(404).send("Unknown order");
-    const amount = (hit.payment.amountPaise / 100).toFixed(0);
-    res.type("html").send(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Simulated checkout · Hades AI</title>
-<style>body{margin:0;font-family:system-ui,sans-serif;background:#06070a;color:#e9ecf3;display:grid;place-items:center;min-height:100vh}
-.card{width:min(380px,92vw);background:#0f1218;border:1px solid #232836;border-radius:16px;padding:28px}
-.tag{display:inline-block;font:600 11px/1 ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#f2c14e;background:rgba(242,193,78,.12);padding:6px 8px;border-radius:6px}
-h1{font-size:22px;margin:16px 0 4px}p{color:#8b93a5;font-size:14px;line-height:1.5}
-.amt{font:500 34px ui-monospace,monospace;margin:18px 0}button{width:100%;padding:13px;border-radius:10px;border:0;font-weight:600;font-size:15px;cursor:pointer;margin-top:8px}
-.pay{background:#e9ecf3;color:#06070a}.cancel{background:transparent;color:#8b93a5;border:1px solid #232836}</style></head>
-<body><form class="card" method="post"><span class="tag">Simulated · not Pine Labs</span><h1>Hades Pro</h1>
-<p>Pine Labs test credentials aren't configured yet, so this page stands in for the hosted checkout. No money moves.</p>
-<div class="amt">₹${amount}</div><button class="pay" name="result" value="success">Simulate UPI payment</button>
-<button class="cancel" name="result" value="failure">Cancel</button></form></body></html>`);
-  }),
-);
-app.post(
-  "/api/payments/simulated/:ref",
-  h((req, res) => {
-    const ref = param(req, "ref");
-    const ok = req.body?.result === "success";
-    const ws = markPaid(ref, ok ? "authorized" : "failed");
-    res.redirect(`${WEB_URL}/app${ws ? `?w=${ws.id}&paid=${ok ? 1 : 0}` : ""}`);
   }),
 );
 
@@ -568,6 +579,8 @@ app.get("/api/admin/stats", (req, res) => {
       users: users.length,
       events: ws.length,
       pro: ws.filter((w) => effectivePlan(w) === "pro").length,
+      paymentsPaid: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "captured" || p.status === "authorized").length, 0),
+      paymentsPending: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "pending").length, 0),
       revenueInr: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "captured" || p.status === "authorized").reduce((m, p) => m + p.amountPaise / 100, 0), 0),
       agentCommands: count((w) => (w.agentThread ?? []).filter((t) => t.role === "user").length),
       analyses: count((w) => w.history.filter((e) => e.action === "change_requested").length),
@@ -578,7 +591,10 @@ app.get("/api/admin/stats", (req, res) => {
     users: users
       .map((u) => ({ email: u.email, name: u.name, signedUpAt: u.createdAt, lastSeenAt: u.lastSeenAt ?? u.lastLoginAt, google: !!u.google?.refreshToken }))
       .sort((x, y) => y.lastSeenAt.localeCompare(x.lastSeenAt)),
-    payments: ws.flatMap((w) => w.payments.map((p) => ({ event: w.project.name, provider: p.provider, status: p.status, amount: p.amountPaise / 100, at: p.updatedAt }))),
+    traffic: trafficSummary(),
+    payments: ws
+      .flatMap((w) => w.payments.map((p) => ({ ref: p.orderId, event: w.project.name, owner: w.ownerName ?? null, provider: p.provider, status: p.status, utr: p.utr ?? null, amount: p.amountPaise / 100, at: p.updatedAt })))
+      .sort((a, b) => b.at.localeCompare(a.at)),
   });
 });
 

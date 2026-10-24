@@ -15,7 +15,8 @@
     "build:api": "npm run build --workspace @hades/api",
     "start:api": "npm run start --workspace @hades/api",
     "lint": "npm run lint --workspace @hades/web",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "check:pinelabs": "tsx --env-file=.env apps/api/scripts/pinelabs-check.ts"
   },
   "engines": {
     "node": ">=20"

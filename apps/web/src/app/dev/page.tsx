@@ -8,7 +8,16 @@ interface Stats {
   active: { usersNow: number; users24h: number; users7d: number; events24h: number };
   totals: Record<string, number>;
   users: { email: string; name: string; signedUpAt: string; lastSeenAt: string; google: boolean }[];
-  payments: { event: string; provider: string; status: string; amount: number; at: string }[];
+  payments: { ref: string; event: string; owner: string | null; provider: string; status: string; utr: string | null; amount: number; at: string }[];
+  traffic: {
+    today: { views: number; visitors: number };
+    last7: { views: number; visitors: number };
+    last30: { views: number; visitors: number };
+    allTime: { views: number; visitors: number };
+    daily: { day: string; views: number; visitors: number }[];
+    topPages: { name: string; views: number }[];
+    referrers: { name: string; views: number }[];
+  };
 }
 
 const KEY = "hades:admin-key";
@@ -53,6 +62,12 @@ export default function DevConsole() {
     return () => window.clearInterval(t);
   }, [stats, key, load]);
 
+  const decide = async (ref: string, decision: "verify" | "reject") => {
+    if (decision === "verify" && !window.confirm("Only verify after you see this UTR in your Google Pay / bank statement. Turn on Pro?")) return;
+    await fetch(`${API_URL}/api/admin/payments/${encodeURIComponent(ref)}/${decision}`, { method: "POST", headers: { "x-admin-key": key } });
+    load(key);
+  };
+
   const card = (label: string, value: number | string) => (
     <div className="rounded-xl border border-line bg-surface p-4">
       <div className="label">{label}</div>
@@ -76,6 +91,51 @@ export default function DevConsole() {
       {error ? <p className="mt-3 text-sm text-ember">{error}</p> : null}
       {stats ? (
         <>
+          <h2 className="label mt-8">Website visitors</h2>
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {card("Today", `${stats.traffic.today.visitors} · ${stats.traffic.today.views} views`)}
+            {card("Last 7 days", `${stats.traffic.last7.visitors} · ${stats.traffic.last7.views} views`)}
+            {card("Last 30 days", `${stats.traffic.last30.visitors} · ${stats.traffic.last30.views} views`)}
+            {card("All time", `${stats.traffic.allTime.visitors} · ${stats.traffic.allTime.views} views`)}
+          </div>
+          <div className="mt-3 rounded-xl border border-line bg-surface p-4">
+            <div className="label">Unique visitors per day (14 days)</div>
+            <div className="mt-3 flex h-28 items-end gap-1.5">
+              {stats.traffic.daily.map((d) => {
+                const max = Math.max(1, ...stats.traffic.daily.map((x) => x.visitors));
+                return (
+                  <div key={d.day} className="flex flex-1 flex-col items-center gap-1" title={`${d.day}: ${d.visitors} visitors, ${d.views} views`}>
+                    <span className="font-mono text-[9px] text-muted">{d.visitors || ""}</span>
+                    <div className="w-full rounded-t bg-styx" style={{ height: `${(d.visitors / max) * 80}px`, minHeight: d.visitors ? 3 : 1 }} />
+                    <span className="font-mono text-[9px] text-dim">{d.day.slice(8)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {(["topPages", "referrers"] as const).map((k) => (
+              <div key={k} className="rounded-xl border border-line bg-surface p-4">
+                <div className="label">{k === "topPages" ? "Top pages (30d)" : "Where visitors come from (30d)"}</div>
+                <ul className="mt-2 space-y-1 font-mono text-xs">
+                  {stats.traffic[k].map((r) => (
+                    <li key={r.name} className="flex justify-between gap-3">
+                      <span className="truncate">{r.name}</span>
+                      <span className="text-muted">{r.views}</span>
+                    </li>
+                  ))}
+                  {!stats.traffic[k].length ? <li className="text-dim">No data yet</li> : null}
+                </ul>
+              </div>
+            ))}
+          </div>
+          <h2 className="label mt-8">Payments</h2>
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {card("Paid", stats.totals.paymentsPaid)}
+            {card("Awaiting confirmation", stats.totals.paymentsPending)}
+            {card("Revenue", `₹${stats.totals.revenueInr}`)}
+            {card("Pro teams", stats.totals.pro)}
+          </div>
           <h2 className="label mt-8">Active users</h2>
           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {card("Now (15 min)", stats.active.usersNow)}
@@ -121,11 +181,26 @@ export default function DevConsole() {
           </div>
           {stats.payments.length ? (
             <>
-              <h2 className="label mt-8">Payments</h2>
-              <ul className="mt-2 space-y-1 font-mono text-xs text-muted">
-                {stats.payments.map((p, i) => (
-                  <li key={i}>
-                    {new Date(p.at).toLocaleString("en-IN")} · {p.event} · {p.provider} · {p.status} · ₹{p.amount}
+              <h2 className="label mt-8">Payment log</h2>
+              <ul className="mt-2 space-y-1.5 font-mono text-xs text-muted">
+                {stats.payments.map((p) => (
+                  <li key={p.ref} className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {new Date(p.at).toLocaleString("en-IN")} · {p.event}
+                      {p.owner ? ` (${p.owner})` : ""} · {p.provider === "upi" ? "Google Pay" : p.provider} · ₹{p.amount} ·{" "}
+                      <span className={p.status === "captured" || p.status === "authorized" ? "text-ok" : p.status === "pending" ? "text-warn" : ""}>{p.status}</span>
+                      {p.utr ? ` · UTR ${p.utr}` : ""}
+                    </span>
+                    {p.status === "pending" ? (
+                      <>
+                        <button onClick={() => decide(p.ref, "verify")} className="rounded border border-ok/50 px-2 py-0.5 text-ok">
+                          Verify
+                        </button>
+                        <button onClick={() => decide(p.ref, "reject")} className="rounded border border-line-2 px-2 py-0.5">
+                          Reject
+                        </button>
+                      </>
+                    ) : null}
                   </li>
                 ))}
               </ul>

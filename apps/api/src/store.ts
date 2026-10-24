@@ -25,9 +25,18 @@ export interface StoredUser {
   google?: { accessToken: string; refreshToken?: string; expiresAt: number; scope: string };
 }
 
+/** Per-day site traffic: page views, unique visitor ids, views per path, and where people came from. */
+interface DayTraffic {
+  views: number;
+  visitors: string[];
+  paths: Record<string, number>;
+  referrers: Record<string, number>;
+}
+
 interface Persisted {
   workspaces: Record<string, WorkspaceState>;
   users?: Record<string, StoredUser>;
+  traffic?: Record<string, DayTraffic>;
 }
 
 const workspaces = new Map<string, WorkspaceState>();
@@ -36,6 +45,55 @@ const users = new Map<string, StoredUser>();
 const reports = new Map<string, ImpactReport>();
 
 let repaired = false;
+const traffic: Record<string, DayTraffic> = {};
+
+/** Records one page view. Visitor ids are random per-browser ids, no personal data. */
+export function recordView(input: { visitorId: string; path: string; referrer?: string }) {
+  const day = new Date().toISOString().slice(0, 10);
+  const t = (traffic[day] ??= { views: 0, visitors: [], paths: {}, referrers: {} });
+  t.views++;
+  if (!t.visitors.includes(input.visitorId)) t.visitors.push(input.visitorId);
+  const path = input.path.split("?")[0].slice(0, 80) || "/";
+  t.paths[path] = (t.paths[path] ?? 0) + 1;
+  let ref = "direct";
+  try {
+    if (input.referrer) ref = new URL(input.referrer).hostname || "direct";
+  } catch {}
+  t.referrers[ref] = (t.referrers[ref] ?? 0) + 1;
+  scheduleFlush();
+}
+
+export function trafficSummary() {
+  const days = Object.keys(traffic).sort();
+  const today = new Date().toISOString().slice(0, 10);
+  const since = (n: number) => new Date(Date.now() - (n - 1) * 864e5).toISOString().slice(0, 10);
+  const window = (n: number) => {
+    const ds = days.filter((d) => d >= since(n));
+    const uniq = new Set(ds.flatMap((d) => traffic[d].visitors));
+    return { views: ds.reduce((s, d) => s + traffic[d].views, 0), visitors: uniq.size };
+  };
+  const top = (key: "paths" | "referrers") => {
+    const acc: Record<string, number> = {};
+    for (const d of days.filter((x) => x >= since(30))) for (const [k, v] of Object.entries(traffic[d][key])) acc[k] = (acc[k] ?? 0) + v;
+    return Object.entries(acc)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([name, views]) => ({ name, views }));
+  };
+  const daily = Array.from({ length: 14 }, (_, i) => {
+    const d = since(14 - i);
+    return { day: d, views: traffic[d]?.views ?? 0, visitors: traffic[d]?.visitors.length ?? 0 };
+  });
+  return {
+    today: { views: traffic[today]?.views ?? 0, visitors: traffic[today]?.visitors.length ?? 0 },
+    last7: window(7),
+    last30: window(30),
+    allTime: { views: days.reduce((s, d) => s + traffic[d].views, 0), visitors: new Set(days.flatMap((d) => traffic[d].visitors)).size },
+    daily,
+    topPages: top("paths"),
+    referrers: top("referrers"),
+  };
+}
 function hydrate(data: Persisted, source: string) {
   for (const [id, w] of Object.entries(data.workspaces ?? {})) {
     // Migrate workspaces saved before trials existed.
@@ -53,6 +111,7 @@ function hydrate(data: Persisted, source: string) {
     workspaces.set(id, w);
   }
   for (const [id, u] of Object.entries(data.users ?? {})) users.set(id, u);
+  Object.assign(traffic, data.traffic ?? {});
   console.log(`Loaded ${workspaces.size} workspaces and ${users.size} users from ${source}`);
   if (repaired) scheduleFlush();
 }
@@ -79,7 +138,7 @@ function scheduleFlush() {
   if (flushTimer) return;
   flushTimer = setTimeout(async () => {
     flushTimer = null;
-    const snapshot = JSON.stringify({ workspaces: Object.fromEntries(workspaces), users: Object.fromEntries(users) } satisfies Persisted);
+    const snapshot = JSON.stringify({ workspaces: Object.fromEntries(workspaces), users: Object.fromEntries(users), traffic } satisfies Persisted);
     try {
       if (db) {
         await db.query("insert into hades_state (id, data, updated_at) values ('main', $1::jsonb, now()) on conflict (id) do update set data = excluded.data, updated_at = now()", [snapshot]);

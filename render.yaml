@@ -52,6 +52,11 @@ services:
         sync: false
       - key: PINELABS_CLIENT_SECRET
         sync: false
+      # Google Pay / UPI: payments go to this UPI ID and are confirmed in /dev
+      - key: UPI_VPA
+        sync: false
+      - key: UPI_PAYEE_NAME
+        value: Hades AI
       # AgenticOrg coordinator agent (hackathon instance)
       - key: AGENTICORG_BASE_URL
         value: https://agenticorg.hackathon.pinelabs.com

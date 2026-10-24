@@ -7,8 +7,8 @@ import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
  * with Get Order (GET /api/pay/v1/orders/{id}) before upgrading anyone. Webhooks re-run the same check.
  * Docs: https://www.pinelabs.com/docs/online-payments/hosted-checkout/integration-steps
  *
- * Without credentials the API falls back to a clearly labelled simulated checkout,
- * so the product flow can be demoed before UAT keys arrive.
+ * Without credentials, card checkout is off and teams pay with Google Pay (UPI);
+ * Pro is only granted for payments Pine Labs confirms.
  */
 const ENV = (process.env.PINELABS_ENV ?? "uat").toLowerCase();
 const BASE = process.env.PINELABS_BASE_URL ?? (ENV === "prod" ? "https://api.pluralonline.com" : "https://pluraluat.v2.pinepg.in");
@@ -18,7 +18,7 @@ const CLIENT_SECRET = process.env.PINELABS_CLIENT_SECRET ?? "";
 const SIGNING_SECRET = process.env.PINELABS_SIGNING_SECRET ?? CLIENT_SECRET;
 
 export const pinelabsConfigured = () => !!(CLIENT_ID && CLIENT_SECRET);
-export const pinelabsMode = () => (pinelabsConfigured() ? (ENV === "prod" ? "live" : "test") : "simulated");
+export const pinelabsMode = () => (pinelabsConfigured() ? (ENV === "prod" ? "live" : "test") : "off");
 
 let cached: { token: string; expiresAt: number } | null = null;
 

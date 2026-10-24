@@ -838,6 +838,17 @@ export function Console() {
           mode={meta?.payments.mode ?? null}
           busy={busy}
           onPay={startCheckout}
+          upi={meta?.upi ?? null}
+          pendingUpi={!!ws?.payments.some((p) => p.provider === "upi" && p.status === "pending")}
+          onUpi={async (utr) => {
+            if (!ws) return "Payments need the Hades API.";
+            try {
+              applyServer(await api.payUpi(ws.id, utr));
+              return null;
+            } catch (e) {
+              return e instanceof Error ? e.message : "Could not submit the payment";
+            }
+          }}
           onClose={() => {
             setUpgradeOpen(false);
             setUpgradeReason(null);
@@ -1276,13 +1287,24 @@ function UpgradeModal({
   busy,
   onPay,
   onClose,
+  upi,
+  pendingUpi,
+  onUpi,
 }: {
   reason: string | null;
   mode: Meta["payments"]["mode"] | null;
   busy: boolean;
   onPay: () => void;
   onClose: () => void;
+  upi: { vpa: string; name: string } | null;
+  pendingUpi: boolean;
+  onUpi: (utr: string) => Promise<string | null>;
 }) {
+  const [utr, setUtr] = useState("");
+  const [upiMsg, setUpiMsg] = useState<string | null>(null);
+  const upiLink = upi
+    ? `upi://pay?${new URLSearchParams({ pa: upi.vpa, pn: upi.name, am: String(PRO_PRICE_INR), cu: "INR", tn: "Hades AI Pro - 1 month" })}`
+    : null;
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-sm" onClick={onClose}>
       <div className="w-full max-w-md rounded-2xl border border-line-2 bg-surface p-6" onClick={(e) => e.stopPropagation()}>
@@ -1294,22 +1316,53 @@ function UpgradeModal({
           <li>Member agents on Telegram and WhatsApp</li>
           <li>Google Calendar sync and full change history</li>
         </ul>
-        <p className="mt-5 rounded-lg border border-line bg-bg-2 p-3 text-[12.5px] leading-snug text-muted">
-          {mode === "simulated"
-            ? "Pine Labs test keys aren't configured yet, so checkout runs in a clearly labelled simulated mode. No money moves."
-            : mode === "test"
-              ? "Pays with Pine Labs in test mode. Use a Pine Labs test UPI ID or card."
-              : mode === "live"
-                ? "Secure checkout by Pine Labs: UPI, cards, netbanking and wallets."
-                : "Checkout needs the Hades API to be running."}
-        </p>
+        {upi && upiLink ? (
+          <div className="mt-5 rounded-xl border border-styx/40 bg-bg-2 p-4">
+            <span className="label">Pay with Google Pay (UPI)</span>
+            <div className="mt-3 flex items-center gap-4">
+              <img
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=160x160&margin=6&data=${encodeURIComponent(upiLink)}`}
+                alt="UPI QR code"
+                className="h-28 w-28 rounded-lg bg-white"
+              />
+              <div className="text-[12.5px] leading-snug text-muted">
+                Scan with Google Pay or any UPI app, or tap below on your phone. Pays ₹{PRO_PRICE_INR} to <span className="font-mono text-text">{upi.vpa}</span>.
+                <a href={upiLink} className="mt-2 block rounded-lg bg-text px-3 py-2 text-center text-[13px] font-semibold text-bg">
+                  Open Google Pay
+                </a>
+              </div>
+            </div>
+            {pendingUpi ? (
+              <p className="mt-3 text-[12.5px] text-ok">Payment received. We&apos;re confirming it; Pro turns on within minutes.</p>
+            ) : (
+              <form
+                className="mt-3 flex gap-2"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  setUpiMsg(await onUpi(utr.trim()));
+                }}
+              >
+                <input
+                  value={utr}
+                  onChange={(e) => setUtr(e.target.value)}
+                  placeholder="UPI reference (UTR) after paying"
+                  className="flex-1 rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx"
+                />
+                <button className="rounded-lg border border-line-2 px-3 text-sm font-semibold text-text hover:border-styx">I&apos;ve paid</button>
+              </form>
+            )}
+            {upiMsg ? <p className="mt-2 text-[12px] text-ember">{upiMsg}</p> : null}
+          </div>
+        ) : null}
         <div className="mt-5 flex gap-2">
           <button onClick={onClose} className="flex-1 rounded-xl border border-line-2 px-4 py-3 text-sm text-muted">
             Not now
           </button>
-          <button onClick={onPay} disabled={busy || !mode} className="flex-[2] rounded-xl bg-text px-4 py-3 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-50">
-            {busy ? "Opening Pine Labs…" : "Pay with Pine Labs"}
-          </button>
+          {mode === "live" || mode === "test" ? (
+            <button onClick={onPay} disabled={busy} className="flex-[2] rounded-xl bg-text px-4 py-3 text-sm font-semibold text-bg transition hover:bg-styx-2 disabled:opacity-50">
+              {busy ? "Opening Pine Labs…" : mode === "test" ? "Card / netbanking (Pine Labs test)" : "Card / netbanking (Pine Labs)"}
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
