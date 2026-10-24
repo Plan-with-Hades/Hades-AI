@@ -874,6 +874,9 @@ export function Console() {
           busy={busy}
           onPay={startCheckout}
           upi={meta?.upi ?? null}
+          onOpen={() => {
+            if (ws && meta?.upi) api.upiIntent(ws.id).catch(() => {});
+          }}
           pendingUpi={!!ws?.payments.some((p) => p.provider === "upi" && p.status === "pending")}
           onUpi={async (utr) => {
             if (!ws) return "Payments need the Hades API.";
@@ -1325,6 +1328,7 @@ function UpgradeModal({
   upi,
   pendingUpi,
   onUpi,
+  onOpen,
 }: {
   reason: string | null;
   mode: Meta["payments"]["mode"] | null;
@@ -1334,7 +1338,12 @@ function UpgradeModal({
   upi: { vpa: string; name: string } | null;
   pendingUpi: boolean;
   onUpi: (utr: string) => Promise<string | null>;
+  onOpen: () => void;
 }) {
+  useEffect(() => {
+    onOpen();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [utr, setUtr] = useState("");
   const [upiMsg, setUpiMsg] = useState<string | null>(null);
   const upiLink = upi

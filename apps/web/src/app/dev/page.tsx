@@ -8,7 +8,7 @@ interface Stats {
   active: { usersNow: number; users24h: number; users7d: number; events24h: number };
   totals: Record<string, number>;
   users: { email: string; name: string; signedUpAt: string; lastSeenAt: string; google: boolean }[];
-  payments: { ref: string; event: string; owner: string | null; provider: string; status: string; utr: string | null; amount: number; at: string }[];
+  payments: { ref: string; event: string; owner: string | null; ownerEmail: string | null; provider: string; status: string; utr: string | null; amount: number; at: string }[];
   traffic: {
     today: { views: number; visitors: number };
     last7: { views: number; visitors: number };
@@ -133,9 +133,24 @@ export default function DevConsole() {
           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {card("Paid", stats.totals.paymentsPaid)}
             {card("Awaiting confirmation", stats.totals.paymentsPending)}
+            {card("Opened Google Pay, no UTR", stats.totals.paymentsInitiated)}
             {card("Revenue", `₹${stats.totals.revenueInr}`)}
             {card("Pro teams", stats.totals.pro)}
           </div>
+          <form
+            className="mt-3 flex gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const email = new FormData(e.currentTarget).get("email")?.toString().trim();
+              if (!email || !window.confirm(`Only grant Pro after you've seen ₹ arrive from ${email}. Give them a month of Pro?`)) return;
+              const res = await fetch(`${API_URL}/api/admin/grant`, { method: "POST", headers: { "x-admin-key": key, "content-type": "application/json" }, body: JSON.stringify({ email }) });
+              alert(res.ok ? "Pro granted for 30 days." : ((await res.json()) as { error?: string }).error ?? "Failed");
+              load(key);
+            }}
+          >
+            <input name="email" type="email" placeholder="Grant Pro to a customer's Google email (they paid but aren't listed)" className="flex-1 rounded-lg border border-line-2 bg-surface px-3 py-2 text-sm outline-none focus:border-styx" />
+            <button className="rounded-lg border border-line-2 px-3 text-sm font-semibold hover:border-styx">Grant Pro</button>
+          </form>
           <h2 className="label mt-8">Active users</h2>
           <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
             {card("Now (15 min)", stats.active.usersNow)}
@@ -187,11 +202,11 @@ export default function DevConsole() {
                   <li key={p.ref} className="flex flex-wrap items-center gap-2">
                     <span>
                       {new Date(p.at).toLocaleString("en-IN")} · {p.event}
-                      {p.owner ? ` (${p.owner})` : ""} · {p.provider === "upi" ? "Google Pay" : p.provider} · ₹{p.amount} ·{" "}
-                      <span className={p.status === "captured" || p.status === "authorized" ? "text-ok" : p.status === "pending" ? "text-warn" : ""}>{p.status}</span>
+                      {p.owner ? ` (${p.owner}${p.ownerEmail ? `, ${p.ownerEmail}` : ""})` : ""} · {p.provider === "upi" ? "Google Pay" : p.provider} · ₹{p.amount} ·{" "}
+                      <span className={p.status === "captured" || p.status === "authorized" ? "text-ok" : p.status === "pending" || p.status === "initiated" ? "text-warn" : ""}>{p.status}</span>
                       {p.utr ? ` · UTR ${p.utr}` : ""}
                     </span>
-                    {p.status === "pending" ? (
+                    {p.status === "pending" || p.status === "initiated" ? (
                       <>
                         <button onClick={() => decide(p.ref, "verify")} className="rounded border border-ok/50 px-2 py-0.5 text-ok">
                           Verify

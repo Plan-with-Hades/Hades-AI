@@ -331,6 +331,29 @@ app.post("/api/track", (req, res) => {
 
 /* ---------------- Payments: Google Pay (UPI) ---------------- */
 
+/**
+ * Logged when someone opens the Google Pay window, so /dev shows every attempt even if the payer never enters a
+ * UTR. Match it against your bank/Google Pay statement by time and amount, then Verify.
+ */
+app.post(
+  "/api/workspaces/:id/upi-intent",
+  h((req, res) => {
+    if (!UPI_VPA) return res.status(503).json({ error: "Google Pay isn't set up yet." });
+    const id = param(req, "id");
+    const w = getWorkspace(id);
+    if (effectivePlan(w) === "pro") return res.json({ ok: true });
+    const now = new Date().toISOString();
+    if (!w.payments.some((p) => p.provider === "upi" && (p.status === "initiated" || p.status === "pending"))) {
+      const ref = `upi-${id}-${Date.now()}`;
+      updateWorkspace(id, (x) => {
+        x.payments.push({ id: ref, provider: "upi", orderId: ref, amountPaise: PRO_PRICE_PAISE, status: "initiated", checkoutUrl: "", createdAt: now, updatedAt: now });
+        x.history.push({ id: newId(8), at: now, actor: currentUser(req)?.name ?? "team", action: "payment", summary: "Opened the Google Pay window to upgrade", projectVersion: x.project.version });
+      });
+    }
+    res.json({ ok: true });
+  }),
+);
+
 /** The payer paid ₹199 to our UPI ID in Google Pay and gives us the UPI reference. Pro turns on once verified in /dev. */
 app.post(
   "/api/workspaces/:id/upi",
@@ -343,10 +366,33 @@ app.post(
     const now = new Date().toISOString();
     const ref = `upi-${id}-${Date.now()}`;
     const ws = updateWorkspace(id, (x) => {
-      x.payments.push({ id: ref, provider: "upi", orderId: ref, amountPaise: PRO_PRICE_PAISE, status: "pending", checkoutUrl: "", utr, createdAt: now, updatedAt: now });
+      // Turn the "payment started" record into a submitted payment, or create one.
+      const started = x.payments.find((p) => p.provider === "upi" && p.status === "initiated");
+      if (started) Object.assign(started, { status: "pending", utr, updatedAt: now });
+      else x.payments.push({ id: ref, provider: "upi", orderId: ref, amountPaise: PRO_PRICE_PAISE, status: "pending", checkoutUrl: "", utr, createdAt: now, updatedAt: now });
       x.history.push({ id: newId(8), at: now, actor: currentUser(req)?.name ?? "team", action: "payment", summary: `Google Pay payment submitted (UTR ${utr}), awaiting confirmation`, projectVersion: x.project.version });
     });
     res.status(201).json(view(ws));
+  }),
+);
+
+/** Admin grants a month of Pro to everyone's events owned by this Google email (for payments you've already seen arrive). */
+app.post(
+  "/api/admin/grant",
+  h((req, res) => {
+    if (!ADMIN_KEY || req.get("x-admin-key") !== ADMIN_KEY) return res.sendStatus(404);
+    const { email } = z.object({ email: z.string().trim().email() }).parse(req.body);
+    const user = allUsers().find((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (!user) return res.status(404).json({ error: `${email} hasn't signed in to Hades yet.` });
+    const events = allWorkspaces().filter((w) => w.ownerId === user.id);
+    if (!events.length) return res.status(404).json({ error: `${email} has no events.` });
+    const now = new Date().toISOString();
+    for (const w of events) {
+      const ref = `upi-${w.id}-${Date.now()}`;
+      updateWorkspace(w.id, (x) => x.payments.push({ id: ref, provider: "upi", orderId: ref, amountPaise: PRO_PRICE_PAISE, status: "pending", checkoutUrl: "", utr: "manual", createdAt: now, updatedAt: now }));
+      markPaid(ref, "captured");
+    }
+    res.json({ ok: true, events: events.length });
   }),
 );
 
@@ -586,6 +632,7 @@ app.get("/api/admin/stats", (req, res) => {
       pro: ws.filter((w) => effectivePlan(w) === "pro").length,
       paymentsPaid: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "captured" || p.status === "authorized").length, 0),
       paymentsPending: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "pending").length, 0),
+      paymentsInitiated: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "initiated").length, 0),
       revenueInr: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "captured" || p.status === "authorized").reduce((m, p) => m + p.amountPaise / 100, 0), 0),
       agentCommands: count((w) => (w.agentThread ?? []).filter((t) => t.role === "user").length),
       analyses: count((w) => w.history.filter((e) => e.action === "change_requested").length),
@@ -598,7 +645,7 @@ app.get("/api/admin/stats", (req, res) => {
       .sort((x, y) => y.lastSeenAt.localeCompare(x.lastSeenAt)),
     traffic: trafficSummary(),
     payments: ws
-      .flatMap((w) => w.payments.map((p) => ({ ref: p.orderId, event: w.project.name, owner: w.ownerName ?? null, provider: p.provider, status: p.status, utr: p.utr ?? null, amount: p.amountPaise / 100, at: p.updatedAt })))
+      .flatMap((w) => w.payments.map((p) => ({ ref: p.orderId, event: w.project.name, owner: w.ownerName ?? null, ownerEmail: (w.ownerId ? allUsers().find((u) => u.id === w.ownerId)?.email : null) ?? null, provider: p.provider, status: p.status, utr: p.utr ?? null, amount: p.amountPaise / 100, at: p.updatedAt })))
       .sort((a, b) => b.at.localeCompare(a.at)),
   });
 });

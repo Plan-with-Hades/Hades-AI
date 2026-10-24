@@ -237,7 +237,7 @@ export interface PaymentRecord {
   utr?: string;
   orderId: string;
   amountPaise: number;
-  status: "created" | "pending" | "authorized" | "captured" | "failed";
+  status: "created" | "initiated" | "pending" | "authorized" | "captured" | "failed";
   checkoutUrl: string;
   createdAt: string;
   updatedAt: string;
