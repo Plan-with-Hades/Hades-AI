@@ -44,7 +44,19 @@ export default function Home() {
 
       {/* ---------------- Hero ---------------- */}
       <section className="grain relative isolate flex min-h-[92svh] flex-col justify-end px-5 pb-10 pt-32 sm:px-8">
-        <RippleField className="absolute inset-0 -z-10" />
+        <video
+          aria-hidden
+          className="pointer-events-none absolute inset-0 -z-20 h-full w-full object-cover opacity-90 motion-reduce:hidden"
+          src="/video/hero.mp4"
+          poster="/video/hero-poster.jpg"
+          autoPlay
+          loop
+          muted
+          playsInline
+          preload="auto"
+        />
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-20 bg-bg/20" />
+        <RippleField className="absolute inset-0 -z-10 opacity-80" />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_50%_35%,transparent_0%,var(--bg)_72%)]"
