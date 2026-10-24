@@ -1367,6 +1367,18 @@ function UpgradeModal({
                 </a>
               </div>
             </div>
+            <details className="mt-3 text-[12px] text-muted">
+              <summary className="cursor-pointer text-styx-2">Payment failed or &quot;limit reached&quot;?</summary>
+              <ul className="mt-2 list-disc space-y-1 pl-4 leading-snug">
+                <li>
+                  That limit comes from your bank or UPI app (daily amount, daily number of payments, or a new account). Try another UPI app or bank account, or wait until tomorrow.
+                </li>
+                <li>
+                  Pay manually: in Google Pay choose <b>Pay UPI ID</b>, enter <span className="font-mono text-text">{upi.vpa}</span> and ₹{PRO_PRICE_INR}.
+                </li>
+                <li>Paid but it failed to confirm? Enter the UPI reference (UTR) below anyway; we check it against our account.</li>
+              </ul>
+            </details>
             {pendingUpi ? (
               <p className="mt-3 text-[12.5px] text-ok">Payment received. We&apos;re confirming it; Pro turns on within minutes.</p>
             ) : (
