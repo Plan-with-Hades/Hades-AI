@@ -9,12 +9,13 @@ import { speak, voiceEnabled } from "./voice/elevenlabs";
 import { runAgent } from "./hades-agent";
 import { emailApproval, emailUpdate } from "./notify";
 import { inviteMember } from "./invites";
-import { addMember, blankProject } from "@hades/core";
+import { addMember, blankProject, progressReport, updateTask } from "@hades/core";
+import { syncTracker } from "./google-workspace";
 import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
 import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
 import { createPinelabsOrder, getPinelabsOrder, isPaidStatus, pinelabsConfigured, pinelabsMode, verifyPinelabsRedirect } from "./payments/pinelabs";
-import { allUsers, allWorkspaces, createWorkspace, initStore, recordView, trafficSummary, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
+import { allUsers, allWorkspaces, createWorkspace, getUser, initStore, recordView, trafficSummary, linkMemberships, roleIn, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
 
 /**
  * Hades API. Agents propose; this server enforces version checks, ownership, approval gating,
@@ -121,6 +122,56 @@ app.post(
     if (w.ownerId && roleIn(w, u) !== "manager") return res.status(403).json({ error: "Only the event manager can send invites." });
     const invite = await inviteMember(id, u, param(req, "memberId"));
     res.json({ invite, workspace: view(getWorkspace(id)) });
+  }),
+);
+
+/**
+ * Mark a task done (or reopen it) from the graph. The plan re-schedules, and the Google tracker sheet and
+ * calendar follow automatically with the manager's Google account.
+ */
+app.post(
+  "/api/workspaces/:id/tasks/:taskId/status",
+  h(async (req, res) => {
+    const { status } = z.object({ status: z.enum(["done", "in_progress", "not_started", "blocked"]) }).parse(req.body);
+    const id = param(req, "id");
+    const w = getWorkspace(id);
+    requireActivePlan(w);
+    const u = currentUser(req);
+    const task = w.project.tasks.find((t) => t.id === param(req, "taskId"));
+    if (!task) return res.status(404).json({ error: "Task not found." });
+    const role = roleIn(w, u);
+    const me = u ? w.project.members.find((m) => m.userId === u.id || m.email?.toLowerCase() === u.email.toLowerCase()) : undefined;
+    if (w.ownerId && role !== "manager" && !(role === "member" && me?.id === task.ownerId)) return res.status(403).json({ error: "Only the event manager or the task's owner can change its status." });
+    const project = updateTask(w.project, task.id, { status });
+    const report = progressReport(project);
+    const ws = updateWorkspace(id, (x) => {
+      x.project = project;
+      x.history.push({ id: newId(8), at: new Date().toISOString(), actor: u?.name ?? "team", action: "member_update", summary: `${task.id} "${task.title}" marked ${status.replace("_", " ")}. ${report.headline}`, projectVersion: project.version });
+    });
+    // Keep Google in step: tracker sheet and calendar events, in the background.
+    const owner = ws.ownerId ? getUser(ws.ownerId) : null;
+    const googleTouched = !!(ws.google?.tracker || ws.calendar);
+    if (owner?.google && googleTouched) {
+      void (async () => {
+        const done: string[] = [];
+        try {
+          if (ws.google?.tracker) {
+            const links = await syncTracker(owner, getWorkspace(id));
+            updateWorkspace(id, (x) => (x.google = links));
+            done.push("tracker sheet");
+          }
+          if (ws.calendar) {
+            const out = await syncCalendar(owner, getWorkspace(id));
+            updateWorkspace(id, (x) => (x.calendar = { syncedAt: new Date().toISOString(), events: out.events }));
+            done.push("calendar");
+          }
+          if (done.length) updateWorkspace(id, (x) => x.history.push({ id: newId(8), at: new Date().toISOString(), actor: "hades-agent", action: "google", summary: `Updated the ${done.join(" and ")} after ${task.id} changed`, projectVersion: x.project.version }));
+        } catch (e) {
+          console.warn("Google auto-update failed:", (e as Error).message);
+        }
+      })();
+    }
+    res.json({ ...view(ws, role), googleUpdating: googleTouched && !!owner?.google });
   }),
 );
 

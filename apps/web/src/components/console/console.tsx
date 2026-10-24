@@ -362,6 +362,25 @@ export function Console() {
     }
   };
 
+  const setTaskStatus = async (taskId: string, status: "done" | "not_started") => {
+    if (!state) return;
+    setBusy(true);
+    try {
+      if (ws) {
+        const w = await api.setTaskStatus(ws.id, taskId, status);
+        applyServer(w);
+        flash(`${taskId} marked ${status === "done" ? "done" : "open"}. The plan re-scheduled${w.googleUpdating ? " and your Google tracker and calendar are updating" : ""}.`);
+      } else {
+        setState((st) => st && { ...st, project: { ...st.project, version: st.project.version + 1, tasks: st.project.tasks.map((t) => (t.id === taskId ? { ...t, status } : t)) } });
+        flash(`${taskId} marked ${status === "done" ? "done" : "open"}. The plan re-scheduled.`);
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const resetDemo = async () => {
     timers.current.forEach(clearTimeout);
     if (ws) {
@@ -678,6 +697,9 @@ export function Console() {
                 taskId={selected}
                 sched={view.sched}
                 onClose={() => setSelected(null)}
+                canToggle={project.tasks.some((t) => t.id === selected) && !report}
+                busy={busy}
+                onStatus={(s) => setTaskStatus(selected, s)}
               />
             ) : null}
           </div>
@@ -1093,7 +1115,23 @@ function Feasibility({ report, chosen, project }: { report: ImpactReport; chosen
   );
 }
 
-function TaskDrawer({ project, taskId, sched, onClose }: { project: Project; taskId: string; sched: ReturnType<typeof scheduleProject>; onClose: () => void }) {
+function TaskDrawer({
+  project,
+  taskId,
+  sched,
+  onClose,
+  canToggle,
+  busy,
+  onStatus,
+}: {
+  project: Project;
+  taskId: string;
+  sched: ReturnType<typeof scheduleProject>;
+  onClose: () => void;
+  canToggle: boolean;
+  busy: boolean;
+  onStatus: (s: "done" | "not_started") => void;
+}) {
   const t = project.tasks.find((x) => x.id === taskId);
   if (!t) return null;
   const owner = project.members.find((m) => m.id === t.ownerId);
@@ -1130,6 +1168,17 @@ function TaskDrawer({ project, taskId, sched, onClose }: { project: Project; tas
           </div>
         ) : null}
       </dl>
+      {canToggle ? (
+        <button
+          onClick={() => onStatus(t.status === "done" ? "not_started" : "done")}
+          disabled={busy}
+          className={`mt-3 w-full rounded-lg px-3 py-2 text-sm font-semibold transition disabled:opacity-50 ${
+            t.status === "done" ? "border border-line-2 text-muted hover:text-text" : "bg-ok text-bg hover:opacity-90"
+          }`}
+        >
+          {t.status === "done" ? "Reopen task" : "✓ Mark as done"}
+        </button>
+      ) : null}
       {t.acceptanceCriteria.length ? (
         <ul className="mt-3 space-y-1 text-[12px] text-muted">
           {t.acceptanceCriteria.map((c) => (

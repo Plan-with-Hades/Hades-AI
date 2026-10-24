@@ -109,6 +109,8 @@ export const api = {
     post<{ invite: InviteResult; workspace: ServerWorkspace }>(`/api/workspaces/${id}/members`, body),
   invite: (id: string, memberId: string) => post<{ invite: InviteResult; workspace: ServerWorkspace }>(`/api/workspaces/${id}/members/${memberId}/invite`),
   reset: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/reset`),
+  setTaskStatus: (id: string, taskId: string, status: "done" | "in_progress" | "not_started" | "blocked") =>
+    post<ServerWorkspace & { googleUpdating?: boolean }>(`/api/workspaces/${id}/tasks/${taskId}/status`, { status }),
   upiIntent: (id: string) => post<{ ok: boolean }>(`/api/workspaces/${id}/upi-intent`),
   payUpi: (id: string, utr: string) => post<ServerWorkspace>(`/api/workspaces/${id}/upi`, { utr }),
   checkout: (id: string) => post<{ checkoutUrl: string; mode: string }>(`/api/workspaces/${id}/checkout`),
