@@ -1,0 +1,27 @@
+{
+  "name": "@hades/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hades AI backend: projects, change analysis, approvals, member agents and chat channels.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=../../.env src/server.ts",
+    "build": "tsup",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hades/core": "*",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.0",
+    "@types/node": "^20",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5"
+  }
+}
