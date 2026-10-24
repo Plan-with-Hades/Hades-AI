@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 /**
  * Telegram adapter for member agents.
  * - Production: Telegram calls POST /api/channels/telegram/webhook (verified with a secret token).
@@ -5,7 +6,8 @@
  * Teammates link by opening t.me/<bot>?start=<join code>.
  */
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
-export const TELEGRAM_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ?? "";
+/** Telegram only accepts A-Z a-z 0-9 _ - in a secret token, and Render's generated values contain other characters. */
+export const TELEGRAM_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET ? createHash("sha256").update(process.env.TELEGRAM_WEBHOOK_SECRET).digest("hex") : "";
 const api = (method: string) => `https://api.telegram.org/bot${TOKEN}/${method}`;
 
 export const telegramEnabled = () => TOKEN.length > 0;
