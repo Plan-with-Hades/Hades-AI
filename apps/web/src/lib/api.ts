@@ -1,4 +1,4 @@
-import type { EffectivePlan, ImpactReport, PublicUser, WorkspaceState } from "@hades/core";
+import type { AgentTurn, EffectivePlan, ImpactReport, PublicUser, WorkspaceState } from "@hades/core";
 
 /** Base URL of the Hades API. Empty means the console runs its built-in demo engine. */
 const RAW_API = (process.env.NEXT_PUBLIC_API_URL ?? "").trim();
@@ -72,7 +72,9 @@ const post = <T,>(path: string, body?: unknown) => call<T>(path, { method: "POST
 export const api = {
   meta: () => call<Meta>("/api/meta"),
   me: () => call<Me>("/api/me"),
-  createWorkspace: () => post<ServerWorkspace>("/api/workspaces"),
+  createWorkspace: (blank = false) => post<ServerWorkspace>("/api/workspaces", blank ? { blank: true } : undefined),
+  agent: (id: string, message: string) =>
+    post<{ turn: AgentTurn; analyze?: string; connectGoogle?: boolean; workspace: ServerWorkspace }>(`/api/workspaces/${id}/agent`, { message }),
   workspace: (id: string, since?: string) =>
     call<ServerWorkspace | { changed: false; updatedAt: string }>(`/api/workspaces/${id}${since ? `?since=${encodeURIComponent(since)}` : ""}`),
   claim: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/claim`),
@@ -86,10 +88,11 @@ export const api = {
   reset: (id: string) => post<ServerWorkspace>(`/api/workspaces/${id}/reset`),
   checkout: (id: string) => post<{ checkoutUrl: string; mode: string }>(`/api/workspaces/${id}/checkout`),
   syncCalendar: (id: string) => post<{ created: number; updated: number; workspace: ServerWorkspace }>(`/api/workspaces/${id}/calendar/sync`),
-  signInUrl: (opts: { workspaceId?: string; calendar?: boolean }) => {
+  signInUrl: (opts: { workspaceId?: string; calendar?: boolean; workspace?: boolean }) => {
     const q = new URLSearchParams({ next: "/app" });
     if (opts.workspaceId) q.set("w", opts.workspaceId);
     if (opts.calendar) q.set("scope", "calendar");
+    if (opts.workspace) q.set("scope", "workspace");
     return `${API_URL}/api/auth/google/start?${q}`;
   },
 };

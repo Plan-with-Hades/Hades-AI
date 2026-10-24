@@ -12,6 +12,8 @@ export interface Member {
   initials: string;
   /** Hue used for the member's accent (0-360). */
   hue: number;
+  email?: string;
+  phone?: string;
 }
 
 export interface Task {
@@ -183,6 +185,9 @@ export type AuditAction =
   | "member_linked"
   | "payment"
   | "agent_review"
+  | "plan_edited"
+  | "progress_check"
+  | "google"
   | "reassessed";
 
 export interface AuditEvent {
@@ -253,16 +258,88 @@ export interface WorkspaceState {
   ownerName?: string;
   /** Google Calendar event ids per task, once synced. */
   calendar?: { syncedAt: string; events: Record<string, string> };
+  /** Pro is paid monthly; past this date the team falls back to expired. */
+  proUntil?: string;
+  /** Google Drive folder, tracker sheet, plan doc and any other files the agents created or read. */
+  google?: GoogleLinks;
+  /** Conversation with the Hades agent, newest last (capped). */
+  agentThread?: AgentTurn[];
+  /** Last time anyone opened or changed this event. */
+  lastActiveAt?: string;
   updatedAt: string;
+}
+
+export interface GoogleFile {
+  id: string;
+  name: string;
+  url: string;
+  kind: "folder" | "sheet" | "doc";
+  role?: "workspace" | "tracker" | "plan" | "linked";
+  at: string;
+}
+
+export interface GoogleLinks {
+  folder?: GoogleFile;
+  tracker?: GoogleFile;
+  planDoc?: GoogleFile;
+  files: GoogleFile[];
+}
+
+/* ---------------- The Hades agent ---------------- */
+
+/** Every tool the agent can use. Read tools run straight away; the rest wait for the lead's approval. */
+export type AgentToolName =
+  | "add_member"
+  | "update_member"
+  | "remove_member"
+  | "add_task"
+  | "update_task"
+  | "remove_task"
+  | "add_dependency"
+  | "remove_dependency"
+  | "set_event"
+  | "generate_plan"
+  | "progress_report"
+  | "analyze_change"
+  | "nudge_owners"
+  | "google_create_workspace"
+  | "google_sync_tracker"
+  | "google_pull_tracker"
+  | "google_create_doc"
+  | "google_read"
+  | "google_append"
+  | "calendar_sync";
+
+export interface AgentAction {
+  id: string;
+  tool: AgentToolName;
+  args: Record<string, unknown>;
+  /** One line a person can approve or reject. */
+  summary: string;
+  status: "proposed" | "done" | "rejected" | "failed";
+  result?: string;
+  url?: string;
+}
+
+export interface AgentTurn {
+  id: string;
+  at: string;
+  role: "user" | "agent";
+  text: string;
+  by?: string;
+  actions?: AgentAction[];
+  /** Which brain answered: Claude, or the built-in rules when no model is configured. */
+  engine?: "claude" | "rules";
 }
 
 export type EffectivePlan = "trial" | "pro" | "expired";
 
 export const TRIAL_DAYS = 3;
 export const PRO_PRICE_INR = 599;
+export const PRO_DAYS = 30;
 
-export function effectivePlan(w: Pick<WorkspaceState, "plan" | "trialEndsAt">, now = new Date()): EffectivePlan {
-  if (w.plan === "pro") return "pro";
+export function effectivePlan(w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "proUntil">, now = new Date()): EffectivePlan {
+  if (w.plan === "pro") return !w.proUntil || new Date(w.proUntil).getTime() > now.getTime() ? "pro" : "expired";
   return new Date(w.trialEndsAt).getTime() > now.getTime() ? "trial" : "expired";
 }
 
@@ -272,4 +349,6 @@ export interface PublicUser {
   name: string;
   picture?: string;
   calendarConnected: boolean;
+  /** Docs, Sheets and Drive access granted (the agent can create and edit files). */
+  workspaceConnected: boolean;
 }

@@ -16,11 +16,19 @@ if (!process.env.SESSION_SECRET) console.warn("SESSION_SECRET not set: sessions 
 
 export const googleEnabled = () => !!(CLIENT_ID && CLIENT_SECRET);
 
+export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+export const WORKSPACE_SCOPES = [
+  CALENDAR_SCOPE,
+  "https://www.googleapis.com/auth/documents",
+  "https://www.googleapis.com/auth/spreadsheets",
+  "https://www.googleapis.com/auth/drive.file",
+];
 export const SCOPES = {
   basic: ["openid", "email", "profile"],
-  calendar: ["openid", "email", "profile", "https://www.googleapis.com/auth/calendar.events"],
+  calendar: ["openid", "email", "profile", CALENDAR_SCOPE],
+  /** Calendar, Docs, Sheets and the Drive files Hades creates: what the agents need to plan in Google Workspace. */
+  workspace: ["openid", "email", "profile", ...WORKSPACE_SCOPES],
 } as const;
-export const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
 
 const b64 = (b: Buffer | string) => Buffer.from(b).toString("base64url");
 const sign = (data: string) => createHmac("sha256", SESSION_SECRET).update(data).digest("base64url");
@@ -61,8 +69,8 @@ export function googleAuthUrl(redirectUri: string, state: Omit<OAuthState, "nonc
     scope: SCOPES[state.scope].join(" "),
     state: seal({ ...state, nonce: randomBytes(8).toString("hex") }, 600),
     include_granted_scopes: "true",
-    access_type: state.scope === "calendar" ? "offline" : "online",
-    prompt: state.scope === "calendar" ? "consent" : "select_account",
+    access_type: state.scope === "basic" ? "online" : "offline",
+    prompt: state.scope === "basic" ? "select_account" : "consent",
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
@@ -138,4 +146,5 @@ export const publicUser = (u: StoredUser): PublicUser => ({
   name: u.name,
   picture: u.picture,
   calendarConnected: !!u.google?.scope?.includes(CALENDAR_SCOPE),
+  workspaceConnected: WORKSPACE_SCOPES.every((sc) => u.google?.scope?.includes(sc)),
 });

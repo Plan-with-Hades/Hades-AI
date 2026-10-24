@@ -13,11 +13,13 @@ import {
   GOLDEN_REQUEST,
   PRO_PRICE_INR,
   SAMPLE_REQUESTS,
+  runCommand,
   scheduleProject,
   schedule as runSchedule,
   StaleProposalError,
   TRIAL_DAYS,
   type AgentReview,
+  type AgentTurn,
   type AuditEvent,
   type Basis,
   type ImpactReport,
@@ -31,6 +33,7 @@ import {
 import { Logo } from "@/components/logo";
 import { api, API_URL, ApiError, getRememberedWorkspace, getToken, rememberWorkspace, type Meta, type ServerWorkspace } from "@/lib/api";
 import { TaskGraph, type Highlight } from "./task-graph";
+import { AgentPanel } from "./agent-panel";
 
 type Phase = "idle" | "analyzing" | "review";
 type StoredReassessment = NonNullable<WorkspaceState["reassessment"]>;
@@ -103,6 +106,11 @@ export function Console() {
   const [ws, setWs] = useState<ServerWorkspace | null>(null);
   const [me, setMe] = useState<PublicUser | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
+  const [myEvents, setMyEvents] = useState<{ id: string; name: string }[]>([]);
+  const [tab, setTab] = useState<"agent" | "ripple">("agent");
+  const [localThread, setLocalThread] = useState<AgentTurn[]>([]);
+  const [agentBusy, setAgentBusy] = useState(false);
+  const [needsGoogle, setNeedsGoogle] = useState(false);
   const timers = useRef<number[]>([]);
   const online = ws !== null;
 
@@ -139,10 +147,12 @@ export function Console() {
           if (cancelled) return;
           setMeta(m);
           setMe(mine?.user ?? null);
+          setMyEvents(mine?.workspaces.map((x) => ({ id: x.id, name: x.name })) ?? []);
           applyServer(w);
           rememberWorkspace(w.id);
           const paid = params.get("paid");
           if (paid === "1") flash("Payment received. Your team is on Hades Pro.");
+          else if (paid === "pending") flash("Pine Labs is still confirming the payment. Pro turns on as soon as it does.");
           else if (paid === "0") flash("The payment didn't go through. You can try again.");
           else if (paid === "unverified") flash("We couldn't verify that payment yet. It will update when Pine Labs confirms.");
           params.delete("paid");
@@ -230,6 +240,7 @@ export function Console() {
         return;
       }
       setReport(r);
+      setTab("ripple");
       setDecisions(Object.fromEntries(r.changes.map((c) => [c.id, c.recommended])));
       setPhase("analyzing");
       setStep(0);
@@ -408,6 +419,77 @@ export function Console() {
     }
   };
 
+  /* ---------------- Hades agent ---------------- */
+  const sendToAgent = async (text: string) => {
+    if (!state) return;
+    setNeedsGoogle(false);
+    if (ws) {
+      setAgentBusy(true);
+      const pending: AgentTurn = { id: `p-${Date.now()}`, at: new Date().toISOString(), role: "user", text, by: me?.name };
+      setWs((cur) => (cur ? { ...cur, agentThread: [...(cur.agentThread ?? []), pending] } : cur));
+      try {
+        const out = await api.agent(ws.id, text);
+        applyServer(out.workspace);
+        if (out.connectGoogle) setNeedsGoogle(true);
+        if (out.analyze) {
+          setRequest(out.analyze);
+          await analyze(out.analyze);
+        }
+      } catch (e) {
+        fail(e);
+        setWs((cur) => (cur ? { ...cur, agentThread: (cur.agentThread ?? []).filter((t) => t.id !== pending.id) } : cur));
+      } finally {
+        setAgentBusy(false);
+      }
+      return;
+    }
+    // Offline demo: plan edits run in the browser; Google needs the API.
+    const at = new Date().toISOString();
+    const out = runCommand(state.project, text);
+    let reply = out.reply;
+    if (out.intents.some((i) => i.tool.startsWith("google_") || i.tool === "calendar_sync" || i.tool === "nudge_owners")) reply = "That needs the Hades server and a Google sign-in. Open the hosted console to use Google Workspace.";
+    if (out.project) setState((st) => st && { ...st, project: out.project! });
+    setLocalThread((t) => [...t, { id: uid(), at, role: "user", text }, { id: uid(), at, role: "agent", text: reply, engine: "rules" }]);
+    const change = out.intents.find((i) => i.tool === "analyze_change");
+    if (change) {
+      setRequest(text);
+      await analyze(text);
+    }
+  };
+
+  const newEvent = async () => {
+    if (!ws) {
+      flash("Creating events needs the Hades API.");
+      return;
+    }
+    try {
+      const w = await api.createWorkspace(true);
+      applyServer(w);
+      rememberWorkspace(w.id);
+      setMyEvents((list) => [{ id: w.id, name: w.project.name }, ...list]);
+      setReport(null);
+      setTab("agent");
+      window.history.replaceState(null, "", `/app?w=${w.id}`);
+      flash("New event created. Tell the agent what you're planning.");
+    } catch (e) {
+      fail(e);
+    }
+  };
+
+  const switchEvent = async (id: string) => {
+    try {
+      const got = await api.workspace(id);
+      if ("project" in got) {
+        applyServer(got);
+        rememberWorkspace(got.id);
+        setReport(null);
+        window.history.replaceState(null, "", `/app?w=${got.id}`);
+      }
+    } catch (e) {
+      fail(e);
+    }
+  };
+
   /* ---------------- Derived view ---------------- */
   const view = useMemo(() => {
     if (!project || !baseSchedule) return null;
@@ -441,7 +523,8 @@ export function Console() {
   }
 
   const done = project.tasks.filter((t) => t.status === "done").length;
-  const pct = Math.round((done / project.tasks.length) * 100);
+  const pct = project.tasks.length ? Math.round((done / project.tasks.length) * 100) : 0;
+  const connectUrl = ws && meta?.google.enabled ? api.signInUrl({ workspaceId: ws.id, workspace: true }) : null;
   const chosenCount = report ? report.changes.filter((c) => decisions[c.id]).length : 0;
   const memberById = (id: string) => project.members.find((m) => m.id === id);
 
@@ -456,7 +539,21 @@ export function Console() {
           </Link>
           <div className="flex min-w-0 items-center gap-3">
             <span className="h-4 w-px bg-line-2" />
-            <span className="truncate text-sm font-semibold">{project.name}</span>
+            {myEvents.length > 1 ? (
+              <select
+                value={ws?.id}
+                onChange={(e) => switchEvent(e.target.value)}
+                className="max-w-[220px] truncate rounded-lg border border-line bg-surface px-2 py-1 text-sm font-semibold text-text outline-none"
+              >
+                {myEvents.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.id === ws?.id ? project.name : e.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="truncate text-sm font-semibold">{project.name}</span>
+            )}
             <span className="rounded border border-line px-1.5 py-0.5 font-mono text-[10px] text-muted">v{project.version}</span>
           </div>
           <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -469,10 +566,31 @@ export function Console() {
             <Pill label="Done" value={`${pct}%`} />
             <PlanBadge ws={ws} onUpgrade={() => setUpgradeOpen(true)} />
             <HeaderButton onClick={() => setConnectOpen(true)}>Connect team</HeaderButton>
+            {online ? <HeaderButton onClick={newEvent}>+ New event</HeaderButton> : null}
+            {me?.workspaceConnected ? (
+              ws?.google?.folder ? (
+                <a href={ws.google.folder.url} target="_blank" rel="noreferrer" className="rounded-full border border-line px-3 py-1.5 text-xs font-semibold text-muted transition hover:border-line-2 hover:text-text">
+                  Google Drive ↗
+                </a>
+              ) : (
+                <HeaderButton onClick={() => sendToAgent("Create a Google workspace")} disabled={agentBusy}>
+                  Create Google workspace
+                </HeaderButton>
+              )
+            ) : (
+              <HeaderButton
+                onClick={() => {
+                  if (connectUrl) window.location.href = connectUrl;
+                  else flash("Google sign-in isn't configured on the server yet.");
+                }}
+              >
+                Connect Google Workspace
+              </HeaderButton>
+            )}
             <HeaderButton onClick={syncCalendar} disabled={busy}>
-              {me?.calendarConnected ? "Sync calendar" : "Google Calendar"}
+              {me?.calendarConnected ? "Sync calendar" : "Calendar"}
             </HeaderButton>
-            <HeaderButton onClick={resetDemo}>Reset</HeaderButton>
+            <HeaderButton onClick={resetDemo}>Reset demo</HeaderButton>
             {online && meta?.google.enabled ? (
               me ? (
                 <span className="flex items-center gap-2 rounded-full border border-line py-1 pl-1 pr-3 text-xs" title={me.email}>
@@ -543,6 +661,27 @@ export function Console() {
 
         {/* ---------------- Right: change + agents + approval ---------------- */}
         <aside className="flex min-h-0 min-w-0 flex-col bg-bg-2">
+          <div className="flex border-b border-line">
+            {(["agent", "ripple"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`flex-1 px-4 py-3 text-[13px] font-semibold transition ${tab === t ? "border-b-2 border-styx text-text" : "text-muted hover:text-text"}`}
+              >
+                {t === "agent" ? "Agent" : "Change ripple"}
+              </button>
+            ))}
+          </div>
+          {tab === "agent" ? (
+            <AgentPanel
+              thread={ws ? (ws.agentThread ?? []) : localThread}
+              busy={agentBusy}
+              google={ws?.google}
+              connectUrl={needsGoogle ? connectUrl : null}
+              onSend={sendToAgent}
+            />
+          ) : (
+          <>
           <div className="border-b border-line p-4 sm:p-5">
             <label htmlFor="change" className="label">
               What changed?
@@ -680,6 +819,8 @@ export function Console() {
               <IdlePanel state={state} />
             )}
           </div>
+          </>
+          )}
         </aside>
       </div>
 

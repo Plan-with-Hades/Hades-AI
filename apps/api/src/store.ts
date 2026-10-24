@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import pg from "pg";
-import { createDemoProject, TRIAL_DAYS, type ImpactReport, type WorkspaceState } from "@hades/core";
+import { blankProject, createDemoProject, TRIAL_DAYS, type ImpactReport, type WorkspaceState } from "@hades/core";
 
 /**
  * Workspaces live in memory and are flushed after every change, so a restart keeps teams' projects.
@@ -21,6 +21,7 @@ export interface StoredUser {
   picture?: string;
   createdAt: string;
   lastLoginAt: string;
+  lastSeenAt?: string;
   google?: { accessToken: string; refreshToken?: string; expiresAt: number; scope: string };
 }
 
@@ -86,10 +87,10 @@ function scheduleFlush() {
 
 const shortId = (n = 6) => randomBytes(n).toString("base64url").replace(/[^a-z0-9]/gi, "").toLowerCase().slice(0, n);
 
-export function createWorkspace(owner?: { id: string; name: string }): WorkspaceState {
+export function createWorkspace(owner?: { id: string; name: string; email?: string }, opts: { blank?: boolean } = {}): WorkspaceState {
   let id = shortId(6);
   while (workspaces.has(id)) id = shortId(6);
-  const project = { ...createDemoProject(), id };
+  const project = opts.blank ? blankProject(id, { name: owner?.name ?? "Event lead", email: owner?.email }) : { ...createDemoProject(), id };
   const now = new Date().toISOString();
   const w: WorkspaceState = {
     id,
@@ -190,3 +191,18 @@ export function saveUser(u: StoredUser) {
 export const allUsers = () => [...users.values()];
 export const allWorkspaces = () => [...workspaces.values()];
 export const workspacesOf = (userId: string) => [...workspaces.values()].filter((w) => w.ownerId === userId);
+
+/** Marks a signed-in user as active (at most once a minute) for the developer console. */
+export function touchUser(u: StoredUser) {
+  const now = Date.now();
+  if (u.lastSeenAt && now - new Date(u.lastSeenAt).getTime() < 60_000) return;
+  u.lastSeenAt = new Date(now).toISOString();
+  scheduleFlush();
+}
+
+export function touchWorkspace(w: WorkspaceState) {
+  const now = Date.now();
+  if (w.lastActiveAt && now - new Date(w.lastActiveAt).getTime() < 60_000) return;
+  w.lastActiveAt = new Date(now).toISOString();
+  scheduleFlush();
+}

@@ -1,16 +1,17 @@
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
-import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
+import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, PRO_DAYS, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
 import { CALENDAR_SCOPE, completeGoogleLogin, currentUser, googleAuthUrl, googleEnabled, publicUser, requireUser, sessionFor, unseal, type OAuthState } from "./auth";
 import { syncCalendar } from "./google-calendar";
 import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agents";
 import { speak, voiceEnabled } from "./voice/elevenlabs";
+import { runAgent } from "./hades-agent";
 import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
 import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
-import { createPinelabsOrder, pinelabsConfigured, pinelabsMode, verifyPinelabsSignature } from "./payments/pinelabs";
-import { allUsers, allWorkspaces, createWorkspace, initStore, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
+import { createPinelabsOrder, getPinelabsOrder, isPaidStatus, pinelabsConfigured, pinelabsMode, verifyPinelabsRedirect } from "./payments/pinelabs";
+import { allUsers, allWorkspaces, createWorkspace, initStore, touchUser, touchWorkspace, findPayment, getReport, getWorkspace, newId, saveReport, updateWorkspace, workspacesOf } from "./store";
 
 /**
  * Hades API. Agents propose; this server enforces version checks, ownership, approval gating,
@@ -22,6 +23,14 @@ const origins = (process.env.CORS_ORIGINS ?? "http://localhost:3000").split(",")
 app.use(cors({ origin: origins.includes("*") ? true : origins }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
+// Activity for the developer console: who is signed in and using Hades right now.
+app.use((req, _res, next) => {
+  if (req.path.startsWith("/api/")) {
+    const u = currentUser(req);
+    if (u) touchUser(u);
+  }
+  next();
+});
 
 /** Accepts full URLs or bare hosts (Render's fromService "host" property). */
 const asUrl = (v: string | undefined, fallback: string) => {
@@ -71,11 +80,25 @@ function requireActivePlan(w: WorkspaceState) {
 
 app.post("/api/workspaces", (req, res) => {
   const u = currentUser(req);
-  res.status(201).json(view(createWorkspace(u ? { id: u.id, name: u.name } : undefined)));
+  const blank = req.body?.blank === true;
+  res.status(201).json(view(createWorkspace(u ? { id: u.id, name: u.name, email: u.email } : undefined, { blank })));
 });
+
+/** The Hades agent: people, tasks, new event plans, progress, and Google Workspace. */
+app.post(
+  "/api/workspaces/:id/agent",
+  h(async (req, res) => {
+    const { message } = z.object({ message: z.string().trim().min(1).max(2000) }).parse(req.body);
+    const id = param(req, "id");
+    requireActivePlan(getWorkspace(id));
+    const out = await runAgent(id, currentUser(req), message);
+    res.json({ ...out, workspace: view(getWorkspace(id)) });
+  }),
+);
 
 app.get("/api/workspaces/:id", (req, res) => {
   const w = getWorkspace(param(req, "id"));
+  touchWorkspace(w);
   if (req.query.since && req.query.since === w.updatedAt) return res.json({ changed: false, updatedAt: w.updatedAt });
   res.json(view(w));
 });
@@ -251,7 +274,8 @@ app.post(
   h(async (req, res) => {
     const id = param(req, "id");
     const w = getWorkspace(id);
-    if (w.plan === "pro") return res.status(409).json({ error: "This team is already on Pro." });
+    if (effectivePlan(w) === "pro") return res.status(409).json({ error: "This team is already on Pro." });
+    const buyer = currentUser(req);
     const reference = `hades-${id}-${Date.now()}`;
     const now = new Date().toISOString();
     if (pinelabsConfigured()) {
@@ -260,7 +284,7 @@ app.post(
         amountPaise: PRO_PRICE_PAISE,
         callbackUrl: `${PUBLIC_API_URL}/api/payments/pinelabs/callback`,
         failureCallbackUrl: `${PUBLIC_API_URL}/api/payments/pinelabs/failure`,
-        customer: { firstName: w.project.members[0].name },
+        customer: { firstName: buyer?.name ?? w.project.members[0].name, email: buyer?.email },
       });
       updateWorkspace(id, (x) =>
         x.payments.push({ id: reference, provider: "pinelabs", orderId: order.orderId, amountPaise: PRO_PRICE_PAISE, status: "created", checkoutUrl: order.checkoutUrl, createdAt: now, updatedAt: now }),
@@ -280,9 +304,14 @@ function markPaid(orderId: string, status: "authorized" | "captured" | "failed")
   if (!hit) return null;
   return updateWorkspace(hit.workspace.id, (x) => {
     const p = x.payments.find((q) => q.orderId === orderId)!;
+    if (p.status === "captured" || p.status === "authorized") return; // already granted
     p.status = status;
     p.updatedAt = new Date().toISOString();
-    if (status !== "failed") x.plan = "pro";
+    if (status !== "failed") {
+      x.plan = "pro";
+      const from = x.proUntil && new Date(x.proUntil) > new Date() ? new Date(x.proUntil) : new Date();
+      x.proUntil = new Date(from.getTime() + PRO_DAYS * 864e5).toISOString();
+    }
     x.history.push({
       id: newId(8),
       at: p.updatedAt,
@@ -294,20 +323,47 @@ function markPaid(orderId: string, status: "authorized" | "captured" | "failed")
   });
 }
 
-/** Pine Labs redirects the customer here (GET or POST) with order_id, payment_status and signature. */
-const pinelabsCallback: Handler = (req, res) => {
+/**
+ * Pine Labs redirects the customer here (GET or POST) with order_id, status and signature.
+ * Pro is granted only after Pine Labs' own order record says the payment went through.
+ */
+async function confirmPinelabs(orderId: string): Promise<"paid" | "failed" | "pending"> {
+  const order = await getPinelabsOrder(orderId);
+  if (isPaidStatus(order.status)) {
+    markPaid(orderId, order.status === "AUTHORIZED" ? "authorized" : "captured");
+    return "paid";
+  }
+  if (["FAILED", "CANCELLED"].includes(order.status)) {
+    markPaid(orderId, "failed");
+    return "failed";
+  }
+  return "pending";
+}
+
+const pinelabsCallback: Handler = async (req, res) => {
   const p = { ...req.query, ...req.body } as Record<string, string>;
   const orderId = p.order_id ?? p.orderId;
-  const status = (p.payment_status ?? p.status ?? "").toUpperCase();
   const hit = orderId ? findPayment(orderId) : null;
   if (!hit) return res.redirect(`${WEB_URL}/app?paid=0`);
-  if (!verifyPinelabsSignature(orderId, status, p.signature)) {
-    console.warn(`Pine Labs signature check failed for ${orderId}`);
-    return res.redirect(`${WEB_URL}/app?w=${hit.workspace.id}&paid=unverified`);
+  if (p.signature && !verifyPinelabsRedirect(p)) console.warn(`Pine Labs redirect signature did not match for ${orderId}; confirming with the order API`);
+  let result: "paid" | "failed" | "pending" = "pending";
+  try {
+    result = await confirmPinelabs(orderId);
+  } catch (e) {
+    console.error("Pine Labs confirmation failed:", (e as Error).message);
   }
-  markPaid(orderId, status === "CAPTURED" ? "captured" : "authorized");
-  res.redirect(`${WEB_URL}/app?w=${hit.workspace.id}&paid=1`);
+  res.redirect(`${WEB_URL}/app?w=${hit.workspace.id}&paid=${result === "paid" ? 1 : result === "failed" ? 0 : "pending"}`);
 };
+/** Pine Labs webhooks (ORDER_PROCESSED and friends): re-check the order with the API, never trust the body alone. */
+app.post(
+  "/api/payments/pinelabs/webhook",
+  h(async (req, res) => {
+    const b = req.body as Record<string, any>;
+    const orderId = b?.data?.order_id ?? b?.order_id;
+    res.sendStatus(200);
+    if (orderId && findPayment(orderId)) await confirmPinelabs(orderId).catch((e) => console.error("Pine Labs webhook check failed:", (e as Error).message));
+  }),
+);
 app.all("/api/payments/pinelabs/callback", h(pinelabsCallback));
 app.all(
   "/api/payments/pinelabs/failure",
@@ -393,7 +449,7 @@ app.post(
 app.get("/api/auth/google/start", (req, res) => {
   if (!googleEnabled()) return res.status(503).send("Google sign-in isn't configured yet (set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET).");
   const next = typeof req.query.next === "string" && req.query.next.startsWith("/") ? req.query.next : "/app";
-  const scope = req.query.scope === "calendar" ? "calendar" : "basic";
+  const scope = req.query.scope === "workspace" ? "workspace" : req.query.scope === "calendar" ? "calendar" : "basic";
   const workspaceId = typeof req.query.w === "string" ? req.query.w : undefined;
   res.redirect(googleAuthUrl(GOOGLE_REDIRECT, { next, scope, workspaceId }));
 });
@@ -457,20 +513,36 @@ app.post(
 /* ---------------- Traction proof: timestamped signups, payments, agent activity ---------------- */
 
 app.get("/api/admin/stats", (req, res) => {
-  if (!ADMIN_KEY || req.query.key !== ADMIN_KEY) return res.sendStatus(404);
+  if (!ADMIN_KEY || (req.query.key !== ADMIN_KEY && req.get("x-admin-key") !== ADMIN_KEY)) return res.sendStatus(404);
   const ws = allWorkspaces();
+  const users = allUsers();
+  const now = Date.now();
+  const within = (iso: string | undefined, ms: number) => !!iso && now - new Date(iso).getTime() < ms;
+  const H = 36e5;
   const count = (pred: (w: WorkspaceState) => number) => ws.reduce((n, w) => n + pred(w), 0);
   res.json({
     generatedAt: new Date().toISOString(),
-    users: allUsers()
-      .map((u) => ({ email: u.email, name: u.name, signedUpAt: u.createdAt, lastLoginAt: u.lastLoginAt }))
-      .sort((a, b) => a.signedUpAt.localeCompare(b.signedUpAt)),
-    workspaces: ws.length,
-    analyses: count((w) => w.history.filter((e) => e.action === "change_requested").length),
-    approvals: count((w) => w.history.filter((e) => e.action === "change_approved").length),
-    agentMessages: count((w) => w.messages.filter((m) => m.from === "agent").length),
-    chatLinks: count((w) => w.links.length),
-    payments: ws.flatMap((w) => w.payments.map((p) => ({ workspace: w.id, provider: p.provider, status: p.status, amount: p.amountPaise / 100, at: p.updatedAt }))),
+    active: {
+      usersNow: users.filter((u) => within(u.lastSeenAt, 15 * 60e3)).length,
+      users24h: users.filter((u) => within(u.lastSeenAt ?? u.lastLoginAt, 24 * H)).length,
+      users7d: users.filter((u) => within(u.lastSeenAt ?? u.lastLoginAt, 7 * 24 * H)).length,
+      events24h: ws.filter((w) => within(w.lastActiveAt ?? w.updatedAt, 24 * H)).length,
+    },
+    totals: {
+      users: users.length,
+      events: ws.length,
+      pro: ws.filter((w) => effectivePlan(w) === "pro").length,
+      revenueInr: ws.reduce((n, w) => n + w.payments.filter((p) => p.status === "captured" || p.status === "authorized").reduce((m, p) => m + p.amountPaise / 100, 0), 0),
+      agentCommands: count((w) => (w.agentThread ?? []).filter((t) => t.role === "user").length),
+      analyses: count((w) => w.history.filter((e) => e.action === "change_requested").length),
+      approvals: count((w) => w.history.filter((e) => e.action === "change_approved").length),
+      googleActions: count((w) => w.history.filter((e) => e.action === "google").length),
+      chatLinks: count((w) => w.links.length),
+    },
+    users: users
+      .map((u) => ({ email: u.email, name: u.name, signedUpAt: u.createdAt, lastSeenAt: u.lastSeenAt ?? u.lastLoginAt, google: !!u.google?.refreshToken }))
+      .sort((x, y) => y.lastSeenAt.localeCompare(x.lastSeenAt)),
+    payments: ws.flatMap((w) => w.payments.map((p) => ({ event: w.project.name, provider: p.provider, status: p.status, amount: p.amountPaise / 100, at: p.updatedAt }))),
   });
 });
 
