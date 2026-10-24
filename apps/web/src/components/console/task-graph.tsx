@@ -138,6 +138,7 @@ export function TaskGraph({ tasks, dependencies, members, schedule, highlight, p
 
   return (
     <ReactFlow
+      key={nodes.map((n) => n.id).join(",")}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}

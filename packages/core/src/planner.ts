@@ -227,7 +227,10 @@ export function generatePlan(p: Project, input: { name?: string; date?: string |
   }));
   const dependencies = steps.flatMap((s) => s.after.filter((a) => ids.has(a)).map((a) => ({ from: ids.get(a)!, to: ids.get(s.key)! })));
   const name = input.name?.trim() || p.name;
-  return bump(p, { name, description: input.brief?.trim() || p.description, startDate: today, deadline, tasks, dependencies });
+  let planned = bump(p, { name, description: input.brief?.trim() || p.description, startDate: today, deadline, tasks, dependencies });
+  // No date given: set the event day two working days after the plan realistically finishes, so it fits.
+  if (!(input.date && input.date > today)) planned = { ...planned, deadline: addWorkingDays(scheduleProject(planned).finishDate, 2) };
+  return planned;
 }
 
 /* ---------------- Progress tracker ---------------- */
@@ -359,11 +362,12 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
 
   // New event plan
   // Whole-event planning: "plan/organise/set up …", or "create/start …" on an empty event. Never "add".
-  const planVerb = p.tasks.length ? /^(?:plan|organi[sz]e|set up)\s+(?:a|an|the|our|my)?\s*(.+)$/i : /^(?:plan|organi[sz]e|set up|create|new|start)\s+(?:a|an|the|our|my)?\s*(.+)$/i;
+  const planVerb = p.tasks.length ? /^(?:plan|organi[sz]e|set up)\s+(?:(?:a|an|the|our|my)\s+)?(.+)$/i : /^(?:plan|organi[sz]e|set up|create|new|start)\s+(?:(?:a|an|the|our|my)\s+)?(.+)$/i;
   const planMatch = /(called|named)/i.test(text) && p.tasks.length ? null : text.match(planVerb);
   if (planMatch && /\b(event|fest|festival|conference|summit|hackathon|meetup|workshop|wedding|launch|party|day|night|expo|match|tournament|concert)\b/i.test(planMatch[1])) {
     const date = parseDate(text, now);
     const name = planMatch[1]
+      .replace(/^(?:event|party|function|celebration)?\s*(?:to|for)\s+(?:organi[sz]e|plan|host|run|throw|arrange|do|manage)\s+(?:(?:a|an|the|our|my)\s+)?/i, "")
       .replace(/\b(on|for|by|in|at)\b.*$/i, "")
       .trim()
       .replace(/^\w/, (c) => c.toUpperCase());
@@ -419,8 +423,28 @@ export function runCommand(p: Project, raw: string, now = new Date()): CommandRe
     if (!m) return { reply: `I don't know ${reassign[2]} yet. Add them first.`, intents: [] };
     return { project: updateTask(p, reassign[1], { ownerId: m.id }), intents: [], reply: `${reassign[1].toUpperCase()} is now ${m.name}'s.` };
   }
-  const delT = text.match(/^(?:remove|delete|drop|cancel)\s+(?:task\s+)?([A-Za-z]?\d+)\b/i);
+  const delT = text.match(/^(?:remove|delete|drop|cancel|scrap)\s+(?:task\s+)?([A-Za-z]?\d+)\b/i);
   if (delT) return { project: removeTask(p, delT[1]), intents: [], reply: `Removed ${delT[1].toUpperCase()} and reconnected its dependencies.` };
+  // Delete by name: "delete the promotion campaign, it's not needed". Never treated as a change to trace.
+  const delName = text.match(/^(?:remove|delete|drop|cancel|scrap|get rid of|take out)\s+(.+)$/i);
+  if (delName && p.tasks.length) {
+    const hit = findTaskByName(p, delName[1]);
+    if (hit.task) {
+      const project = removeTask(p, hit.task.id);
+      const sched = scheduleProject(project);
+      return {
+        project,
+        intents: [],
+        reply: `Removed ${hit.task.id} "${hit.task.title}" and reconnected its dependencies. ${sched.feasible ? `The event date holds${sched.bufferDays > 0 ? ` with ${sched.bufferDays} day(s) to spare` : ""}.` : `The plan lands ${formatShort(sched.finishDate)}.`}`,
+      };
+    }
+    return {
+      intents: [],
+      reply: hit.candidates.length
+        ? `Which one do you mean? ${hit.candidates.map((t) => `${t.id} "${t.title}"`).join(", ")}. Say "delete T${hit.candidates[0].id.replace(/\D/g, "")}".`
+        : `I couldn't find a task matching "${delName[1].replace(/[,.].*$/, "").trim()}". Say its ID, e.g. "delete T6".`,
+    };
+  }
   const taskRef = text.match(/\b([A-Za-z]\d{1,3})\b/);
   const status = STATUS_WORDS.find(([re]) => re.test(lower))?.[1];
   if (taskRef && status && p.tasks.some((t) => t.id.toLowerCase() === taskRef[1].toLowerCase())) {
@@ -556,6 +580,27 @@ export function repairMisreadMembers(p: Project): { project: Project; fixed: str
     } else fixed.push(`removed "${m.name}"`);
   }
   return { project, fixed };
+}
+
+const STOP = new Set(["the", "a", "an", "of", "for", "to", "and", "our", "my", "this", "that", "its", "it", "is", "not", "no", "needed", "need", "anymore", "any", "more", "event", "task", "activity", "step", "item", "from", "plan", "pipeline", "please", "since", "because", "as", "we", "dont", "don't", "do", "want", "wont", "won't", "required", "unnecessary"]);
+const stem = (w: string) => w.toLowerCase().replace(/[^a-z0-9]/g, "").replace(/(ing|ion|ions|ers|er|es|ed|s)$/, "");
+
+/** Finds one task a person describes in words ("the promotion campaign"). Several close matches return as candidates. */
+export function findTaskByName(p: Project, phrase: string): { task?: Task; candidates: Task[] } {
+  const cleaned = phrase.replace(/\b(?:it'?s|its|because|since|as|we)\b.*$/i, "").replace(/[,.].*$/, "");
+  const words = cleaned.split(/\s+/).map(stem).filter((w) => w.length > 1 && !STOP.has(w));
+  if (!words.length) return { candidates: [] };
+  const scored = p.tasks
+    .map((t) => {
+      const title = t.title.split(/\s+/).map(stem);
+      const hits = words.filter((w) => title.some((x) => x === w || (w.length > 3 && (x.startsWith(w) || w.startsWith(x)) && x.length > 3))).length;
+      return { t, hits, score: hits / words.length };
+    })
+    .filter((x) => x.hits > 0 && x.score >= 0.5)
+    .sort((a, b) => b.score - a.score || b.hits - a.hits);
+  if (!scored.length) return { candidates: [] };
+  const top = scored.filter((x) => x.score === scored[0].score && x.hits === scored[0].hits);
+  return top.length === 1 ? { task: top[0].t, candidates: [] } : { candidates: top.slice(0, 4).map((x) => x.t) };
 }
 
 /** After adding someone, hand them unstarted tasks that match their role better than the current owner. */
