@@ -34,7 +34,7 @@ const CHANNELS = [
   { name: "Web console", d: "The graph, the impact report and the approve button.", tag: "Live" },
   { name: "WhatsApp & Telegram", d: "Teammates report blockers and get briefed where they already are.", tag: "Live" },
   { name: "Voice check-ins", d: "Hades calls a teammate to confirm an estimate, with Vobiz telephony and an ElevenLabs voice.", tag: "Building" },
-  { name: "Pine Labs checkout", d: "Start with a 3-day free trial, then upgrade a team to Pro in two taps with UPI.", tag: "Live" },
+  { name: "Google Pay checkout", d: "Start with a 3-day free trial, then upgrade a team to Pro by paying ₹599 with Google Pay or any UPI app.", tag: "Live" },
 ];
 
 export default function Home() {
@@ -264,7 +264,7 @@ export default function Home() {
                 <li>Member agents on Telegram and WhatsApp</li>
                 <li>Google Calendar sync and full change history</li>
               </ul>
-              <p className="label mt-6">Pay with UPI, cards or netbanking via Pine Labs</p>
+              <p className="label mt-6">Pay with Google Pay or any UPI app</p>
             </div>
           </div>
         </div>

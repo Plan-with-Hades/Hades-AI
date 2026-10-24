@@ -152,7 +152,7 @@ export function Console() {
           rememberWorkspace(w.id);
           const paid = params.get("paid");
           if (paid === "1") flash("Payment received. Your team is on Hades Pro.");
-          else if (paid === "pending") flash("Pine Labs is still confirming the payment. Pro turns on as soon as it does.");
+          else if (paid === "pending") flash("Your payment is being confirmed. Pro turns on as soon as it is.");
           else if (paid === "0") flash("The payment didn't go through. You can try again.");
           else if (paid === "unverified") flash("We couldn't verify that payment yet. It will update when Pine Labs confirms.");
           params.delete("paid");
