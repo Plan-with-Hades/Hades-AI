@@ -376,8 +376,9 @@ app.post(
     const cur = getWorkspace(id);
     const u = currentUser(req);
     if (cur.ownerId && roleIn(cur, u) !== "manager") return res.status(403).json({ error: "Only the event manager can clear the event." });
+    // The manager is the lead of a cleared event (old demo events still carried the demo's "Ananya").
     const lead = cur.project.members[0];
-    const fresh = blankProject(id, { name: lead?.name ?? "Event lead", email: lead?.email });
+    const fresh = blankProject(id, u && cur.ownerId === u.id ? { name: u.name, email: u.email } : { name: lead?.name ?? "Event lead", email: lead?.email });
     const ws = updateWorkspace(id, (x) => {
       x.project = fresh;
       x.messages = [];
