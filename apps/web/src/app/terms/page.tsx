@@ -14,7 +14,7 @@ export default function Terms() {
       <h2 className="mt-6 font-semibold text-text">Accounts</h2>
       <p className="mt-2">You sign in with Google. Keep your account secure and only invite people who should see your event.</p>
       <h2 className="mt-6 font-semibold text-text">Plans and payment</h2>
-      <p className="mt-2">New teams get a 3-day free trial. Hades Pro costs ₹599 per team per month, paid by UPI (Google Pay or any UPI app). Access starts once we confirm the payment. You can stop renewing at any time; access continues until the paid month ends.</p>
+      <p className="mt-2">New teams get a 3-day free trial. Hades Pro costs ₹199 per team per month, paid by UPI (Google Pay or any UPI app). Access starts once we confirm the payment. You can stop renewing at any time; access continues until the paid month ends.</p>
       <h2 className="mt-6 font-semibold text-text">Acceptable use</h2>
       <p className="mt-2">Don&apos;t use Hades AI to send spam, to invite people who haven&apos;t agreed to be contacted, or to break the law.</p>
       <h2 className="mt-6 font-semibold text-text">Liability</h2>

@@ -47,7 +47,7 @@ npx tsx packages/core/src/demo.check.ts
 
 ## Pricing
 
-**3-day free trial** for every new team (no card), then **Hades Pro at ₹599 per team per month**, paid through Pine Labs. When the trial ends the plan stays readable; analysis and approvals need Pro.
+**3-day free trial** for every new team (no card), then **Hades Pro at ₹199 per team per month**, paid by UPI (Google Pay). When the trial ends the plan stays readable; analysis and approvals need Pro.
 
 ## Integrations and setup
 
@@ -72,7 +72,7 @@ Traction proof for judges: `GET <API>/api/admin/stats?key=<ADMIN_KEY>` lists sig
 | Tool | Where it fits in Hades |
 |---|---|
 | **AgenticOrg** (Pine Labs) | The Orchestrator / member-coordination agent runs here, with the manager's approval as the human-in-the-loop step |
-| **Pine Labs** | Pro plan checkout (₹599 after a 3-day trial), hosted checkout in UAT during the event |
+| **Google Pay (UPI)** | Pro plan checkout (₹199 after a 3-day trial), confirmed by the admin in /dev |
 | **Render** | Hosts the API, Postgres and the web app |
 | **Vobiz** | Voice check-ins: Hades calls a teammate to confirm a revised estimate |
 | **ElevenLabs** | The voice for those calls and spoken impact summaries |

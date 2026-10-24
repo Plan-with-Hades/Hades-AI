@@ -346,7 +346,7 @@ export interface AgentTurn {
 export type EffectivePlan = "trial" | "pro" | "expired";
 
 export const TRIAL_DAYS = 3;
-export const PRO_PRICE_INR = 599;
+export const PRO_PRICE_INR = 199;
 export const PRO_DAYS = 30;
 
 export function effectivePlan(w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "proUntil">, now = new Date()): EffectivePlan {

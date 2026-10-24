@@ -7,10 +7,9 @@ import {
   applyChanges,
   applyMemberUpdate,
   approveChanges,
-  createDemoProject,
+  blankProject,
   DEMO_REPLIES,
   formatShort,
-  GOLDEN_REQUEST,
   PRO_PRICE_INR,
   SAMPLE_REQUESTS,
   runCommand,
@@ -45,7 +44,7 @@ interface State {
   reassessment: StoredReassessment | null;
 }
 
-const STORAGE_KEY = "hades:demo:v3";
+const STORAGE_KEY = "hades:demo:v4";
 const uid = () => Math.random().toString(36).slice(2, 9);
 const lead = (p: Project) => p.members[0]?.name ?? "Manager";
 const toStored = (r: Reassessment): StoredReassessment => ({
@@ -56,7 +55,7 @@ const toStored = (r: Reassessment): StoredReassessment => ({
 });
 
 function freshState(): State {
-  const project = createDemoProject();
+  const project = blankProject("local", { name: "Event lead" });
   return {
     project,
     history: [
@@ -65,7 +64,7 @@ function freshState(): State {
         at: new Date().toISOString(),
         actor: lead(project),
         action: "project_created",
-        summary: `Created "${project.name}" with ${project.tasks.length} tasks and ${project.members.length} people`,
+        summary: "Started an empty event",
         projectVersion: 1,
       },
     ],
@@ -94,7 +93,7 @@ export function Console() {
   const [report, setReport] = useState<ImpactReport | null>(null);
   const [decisions, setDecisions] = useState<Record<string, boolean>>({});
   const [step, setStep] = useState(0);
-  const [request, setRequest] = useState(GOLDEN_REQUEST);
+  const [request, setRequest] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [inboxMember, setInboxMember] = useState<string | null>(null);
@@ -134,16 +133,13 @@ export function Console() {
           const [m, mine] = await Promise.all([api.meta(), getToken() ? api.me().catch(() => null) : Promise.resolve(null)]);
           const wanted = params.get("w") ?? getRememberedWorkspace();
           let w: ServerWorkspace | null = null;
-          if (wanted) {
-            const got = await api.workspace(wanted).catch(() => null);
+          // Signed in: only your own events (or ones you were invited to). First login gets an empty console.
+          const pick = mine ? (mine.workspaces.find((x) => x.id === wanted) ?? mine.workspaces[0])?.id : wanted;
+          if (pick) {
+            const got = await api.workspace(pick).catch(() => null);
             if (got && "project" in got) w = got;
           }
-          if (!w && mine?.workspaces[0]) {
-            const got = await api.workspace(mine.workspaces[0].id).catch(() => null);
-            if (got && "project" in got) w = got;
-          }
-          w ??= await api.createWorkspace();
-          if (mine && !w.ownerId) w = await api.claim(w.id).catch(() => w!);
+          w ??= await api.createWorkspace(true);
           if (cancelled) return;
           setMeta(m);
           setMe(mine?.user ?? null);
@@ -373,9 +369,13 @@ export function Console() {
     }
     setReport(null);
     setPhase("idle");
-    setRequest(GOLDEN_REQUEST);
+    setRequest("");
     setInboxMember(null);
-    flash("Project reset to the starting plan.");
+    setSelected(null);
+    setLocalThread([]);
+    setNeedsGoogle(false);
+    setTab("agent");
+    flash("Cleared. You have an empty console.");
   };
 
   const startCheckout = async () => {
@@ -593,7 +593,7 @@ export function Console() {
             <HeaderButton onClick={syncCalendar} disabled={busy}>
               {me?.calendarConnected ? "Sync calendar" : "Calendar"}
             </HeaderButton>
-            <HeaderButton onClick={resetDemo}>Reset demo</HeaderButton>
+            <HeaderButton onClick={resetDemo}>Reset</HeaderButton>
             {online && meta?.google.enabled ? (
               me ? (
                 <span className="flex items-center gap-2 rounded-full border border-line py-1 pl-1 pr-3 text-xs" title={me.email}>

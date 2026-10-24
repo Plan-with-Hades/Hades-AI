@@ -34,7 +34,7 @@ const CHANNELS = [
   { name: "Web console", d: "The graph, the impact report and the approve button.", tag: "Live" },
   { name: "WhatsApp & Telegram", d: "Teammates report blockers and get briefed where they already are.", tag: "Live" },
   { name: "Voice check-ins", d: "Hades calls a teammate to confirm an estimate, with Vobiz telephony and an ElevenLabs voice.", tag: "Building" },
-  { name: "Google Pay checkout", d: "Start with a 3-day free trial, then upgrade a team to Pro by paying ₹599 with Google Pay or any UPI app.", tag: "Live" },
+  { name: "Google Pay checkout", d: "Start with a 3-day free trial, then upgrade a team to Pro by paying ₹199 with Google Pay or any UPI app.", tag: "Live" },
 ];
 
 export default function Home() {
@@ -257,7 +257,7 @@ export default function Home() {
             <div className="relative rounded-2xl border border-styx/40 bg-bg-2 p-8 shadow-[0_0_60px_-20px_var(--styx)]">
               <h3 className="display text-lg font-bold">Hades Pro</h3>
               <p className="mt-2 font-mono text-3xl">
-                ₹599<span className="text-base text-muted"> / team / month</span>
+                ₹199<span className="text-base text-muted"> / team / month</span>
               </p>
               <ul className="mt-6 space-y-2 text-sm text-muted">
                 <li>Unlimited change analyses and approvals</li>

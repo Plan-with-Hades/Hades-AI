@@ -8,7 +8,7 @@ import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agent
 import { speak, voiceEnabled } from "./voice/elevenlabs";
 import { runAgent } from "./hades-agent";
 import { inviteMember } from "./invites";
-import { addMember } from "@hades/core";
+import { addMember, blankProject } from "@hades/core";
 import { agenticorgEnabled, pendingReview, reviewWithAgenticOrg } from "./agenticorg";
 import { parseUpdate, startTelegram, telegramBotUsername, telegramEnabled, TELEGRAM_SECRET } from "./channels/telegram";
 import { twiml, verifyTwilioSignature, WHATSAPP_FROM, whatsappEnabled } from "./channels/whatsapp";
@@ -295,12 +295,21 @@ app.post(
   "/api/workspaces/:id/reset",
   h((req, res) => {
     const id = param(req, "id");
-    const fresh = { ...createDemoProject(), id };
+    const cur = getWorkspace(id);
+    const u = currentUser(req);
+    if (cur.ownerId && roleIn(cur, u) !== "manager") return res.status(403).json({ error: "Only the event manager can clear the event." });
+    const lead = cur.project.members[0];
+    const fresh = blankProject(id, { name: lead?.name ?? "Event lead", email: lead?.email });
     const ws = updateWorkspace(id, (x) => {
       x.project = fresh;
       x.messages = [];
       x.reassessment = null;
-      x.history.push({ id: newId(8), at: new Date().toISOString(), actor: fresh.members[0].name, action: "project_created", summary: `Reset "${fresh.name}" to the starting plan`, projectVersion: 1 });
+      x.links = [];
+      x.agentThread = [];
+      x.google = undefined;
+      x.calendar = undefined;
+      x.joinCodes = Object.fromEntries(fresh.members.map((m) => [m.id, `${id}-${m.id}`]));
+      x.history = [{ id: newId(8), at: new Date().toISOString(), actor: fresh.members[0].name, action: "project_created", summary: "Cleared the event. Starting from an empty plan", projectVersion: 1 }];
     });
     res.json(view(ws));
   }),
@@ -316,7 +325,7 @@ app.post("/api/track", (req, res) => {
 
 /* ---------------- Payments: Google Pay (UPI) ---------------- */
 
-/** The payer paid ₹599 to our UPI ID in Google Pay and gives us the UPI reference. Pro turns on once verified in /dev. */
+/** The payer paid ₹199 to our UPI ID in Google Pay and gives us the UPI reference. Pro turns on once verified in /dev. */
 app.post(
   "/api/workspaces/:id/upi",
   h((req, res) => {
@@ -509,18 +518,8 @@ app.get(
     }
     const user = await completeGoogleLogin(req.query.code, GOOGLE_REDIRECT);
     linkMemberships(user);
-    // Claim the guest workspace the user started in, if it has no owner yet.
-    if (state.workspaceId) {
-      try {
-        const w = getWorkspace(state.workspaceId);
-        if (!w.ownerId)
-          updateWorkspace(w.id, (x) => {
-            x.ownerId = user.id;
-            x.ownerName = user.name;
-          });
-      } catch {}
-    }
-    const next = state.workspaceId ? `${state.next}${state.next.includes("?") ? "&" : "?"}w=${state.workspaceId}` : state.next;
+    // A signed-in user opens their own events (or an empty console on first login), never a guest's workspace.
+    const next = state.next;
     res.redirect(`${WEB_URL}/auth/done#token=${encodeURIComponent(sessionFor(user))}&next=${encodeURIComponent(next)}`);
   }),
 );
