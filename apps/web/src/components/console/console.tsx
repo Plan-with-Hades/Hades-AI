@@ -30,7 +30,7 @@ import {
   type WorkspaceState,
 } from "@hades/core";
 import { Logo } from "@/components/logo";
-import { api, API_URL, ApiError, getRememberedWorkspace, getToken, rememberWorkspace, type InviteResult, type Meta, type ServerWorkspace } from "@/lib/api";
+import { api, API_URL, ApiError, getRememberedWorkspace, getToken, rememberWorkspace, signOut, type InviteResult, type Meta, type ServerWorkspace } from "@/lib/api";
 import { TaskGraph, type Highlight } from "./task-graph";
 import { AgentPanel } from "./agent-panel";
 
@@ -109,6 +109,7 @@ export function Console() {
   const [tab, setTab] = useState<"agent" | "ripple">("agent");
   const [localThread, setLocalThread] = useState<AgentTurn[]>([]);
   const [agentBusy, setAgentBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [needsGoogle, setNeedsGoogle] = useState(false);
   const timers = useRef<number[]>([]);
   const online = ws !== null;
@@ -602,10 +603,38 @@ export function Console() {
             <HeaderButton onClick={resetDemo}>Reset</HeaderButton>
             {online && meta?.google.enabled ? (
               me ? (
-                <span className="flex items-center gap-2 rounded-full border border-line py-1 pl-1 pr-3 text-xs" title={me.email}>
-                  {me.picture ? <img src={me.picture} alt="" className="h-6 w-6 rounded-full" referrerPolicy="no-referrer" /> : null}
-                  {me.name.split(" ")[0]}
-                </span>
+                <div className="relative">
+                  <button
+                    onClick={() => setMenuOpen((o) => !o)}
+                    className="flex items-center gap-2 rounded-full border border-line py-1 pl-1 pr-3 text-xs transition hover:border-line-2"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                  >
+                    {me.picture ? <img src={me.picture} alt="" className="h-6 w-6 rounded-full" referrerPolicy="no-referrer" /> : <span className="grid h-6 w-6 place-items-center rounded-full bg-styx/30 text-[10px]">{me.name[0]}</span>}
+                    {me.name.split(" ")[0]}
+                    <span aria-hidden className="text-[9px] text-muted">▾</span>
+                  </button>
+                  {menuOpen ? (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setMenuOpen(false)} />
+                      <div role="menu" className="absolute right-0 z-50 mt-2 w-64 rounded-xl border border-line-2 bg-surface p-3 shadow-xl">
+                        <p className="truncate text-sm font-semibold">{me.name}</p>
+                        <p className="truncate text-[12px] text-muted">{me.email}</p>
+                        <p className="mt-2 text-[11px] text-dim">{me.workspaceConnected ? "Google Workspace connected" : "Google Workspace not connected"}</p>
+                        <button
+                          role="menuitem"
+                          onClick={() => {
+                            signOut();
+                            window.location.href = "/app";
+                          }}
+                          className="mt-3 w-full rounded-lg border border-line-2 px-3 py-2 text-sm font-semibold text-text transition hover:border-ember hover:text-ember"
+                        >
+                          Sign out
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
               ) : (
                 <a href={api.signInUrl({ workspaceId: ws?.id })} className="rounded-full border border-line-2 px-3.5 py-1.5 text-xs font-semibold transition hover:border-styx hover:text-styx-2">
                   Sign in with Google

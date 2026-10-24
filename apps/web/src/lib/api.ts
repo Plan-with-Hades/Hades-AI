@@ -62,6 +62,11 @@ export const getToken = () => read(TOKEN_KEY);
 export const setToken = (t: string | null) => write(TOKEN_KEY, t);
 export const getRememberedWorkspace = () => read(WS_KEY);
 export const rememberWorkspace = (id: string) => write(WS_KEY, id);
+/** Signs out on this browser: forget the session and the last event. */
+export function signOut() {
+  write(TOKEN_KEY, null);
+  write(WS_KEY, null);
+}
 
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
