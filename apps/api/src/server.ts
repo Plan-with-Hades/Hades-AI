@@ -1,7 +1,7 @@
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
-import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, FREE_FEATURES, hasPro, PRO_DAYS, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
+import { analyzeChange, applyMemberUpdate, approveChanges, createDemoProject, effectivePlan, FREE_FEATURES, freeLimitMessage, hasPro, PRO_DAYS, PRO_PRICE_INR, StaleProposalError, TRIAL_DAYS, type WorkspaceState } from "@hades/core";
 import { CALENDAR_SCOPE, completeGoogleLogin, currentUser, googleAuthUrl, googleEnabled, publicUser, requireUser, sessionFor, unseal, type OAuthState } from "./auth";
 import { syncCalendar } from "./google-calendar";
 import { alertLead, deliver, handleInbound, toStoredReassessment } from "./agents";
@@ -120,6 +120,8 @@ app.post(
     if (w.ownerId && roleIn(w, u) !== "manager") return res.status(403).json({ error: "Only the event manager can add people." });
     if (w.project.members.some((m) => m.email?.toLowerCase() === b.email.toLowerCase())) return res.status(409).json({ error: `${b.email} is already on the team.` });
     const out = addMember(w.project, b);
+    const cap = hasPro(w) ? null : freeLimitMessage(w.project, out.project);
+    if (cap) return res.status(402).json({ error: `${cap} Upgrade to Hades Pro for unlimited people.` });
     updateWorkspace(id, (x) => {
       x.project = out.project;
       x.joinCodes[out.member.id] = `${x.id}-${out.member.id}`;

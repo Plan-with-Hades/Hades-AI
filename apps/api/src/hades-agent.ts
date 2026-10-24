@@ -1,4 +1,4 @@
-import { PRO_PRICE_INR, addTask, formatProgress, hasPro, formatShort, progressReport, runCommand, updateTask, type AgentAction, type AgentTurn, type MemberMessage, type WorkspaceState } from "@hades/core";
+import { PRO_PRICE_INR, freeLimitMessage, addTask, formatProgress, hasPro, formatShort, progressReport, runCommand, updateTask, type AgentAction, type AgentTurn, type MemberMessage, type WorkspaceState } from "@hades/core";
 import { WORKSPACE_SCOPES } from "./auth";
 import { deliver } from "./agents";
 import { syncCalendar } from "./google-calendar";
@@ -61,6 +61,18 @@ export async function runAgent(workspaceId: string, user: StoredUser | null, mes
   let analyze: string | undefined;
   let connectGoogle = false;
 
+  const capped = cmd.project && !hasPro(w) ? freeLimitMessage(w.project, cmd.project) : null;
+  if (capped) {
+    const agentTurn: AgentTurn = {
+      id: newId(8),
+      at: new Date().toISOString(),
+      role: "agent",
+      text: `${capped} Remove something ("delete T6"), or upgrade to Hades Pro (₹${PRO_PRICE_INR}/month) for unlimited events, tasks and people.`,
+      engine: "rules",
+    };
+    updateWorkspace(workspaceId, (x) => (x.agentThread = [...(x.agentThread ?? []), userTurn, agentTurn].slice(-MAX_THREAD)));
+    return { turn: agentTurn, upgrade: true };
+  }
   if (cmd.project) {
     const before = w.project.version;
     updateWorkspace(workspaceId, (x) => {

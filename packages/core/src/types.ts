@@ -357,16 +357,28 @@ export function effectivePlan(w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "
 /** Trial and Pro both unlock Pro features; only an expired trial or lapsed month drops to Free. */
 export const hasPro = (w: Pick<WorkspaceState, "plan" | "trialEndsAt" | "proUntil">, now = new Date()) => effectivePlan(w, now) !== "expired";
 
+/** The free plan's caps. An event that grew past them during the trial stays readable but can't grow. */
+export const FREE_LIMITS = { events: 1, tasks: 10, people: 3 } as const;
+
+/** Why a change is blocked on the free plan, or null when it is allowed. */
+export function freeLimitMessage(before: { tasks: unknown[]; members: unknown[] }, after: { tasks: unknown[]; members: unknown[] }): string | null {
+  if (after.tasks.length > FREE_LIMITS.tasks && after.tasks.length > before.tasks.length)
+    return `The free plan holds up to ${FREE_LIMITS.tasks} tasks per event (this would make ${after.tasks.length}).`;
+  if (after.members.length > FREE_LIMITS.people && after.members.length > before.members.length)
+    return `The free plan holds up to ${FREE_LIMITS.people} people per event, including you.`;
+  return null;
+}
+
 export const FREE_FEATURES = [
-  "One event with the full dependency graph",
-  "Plan events from a sentence, add people and tasks",
+  `One event, up to ${FREE_LIMITS.tasks} tasks and ${FREE_LIMITS.people} people`,
+  "Plan from a sentence, add people and tasks within those limits",
   "Mark tasks done and see dates re-plan",
   "Progress reports and teammate sign-in",
 ];
 
 export const PRO_FEATURES = [
+  "Unlimited events, tasks and people",
   "Change ripple analysis and approvals",
-  "Unlimited events",
   "Google Workspace: Drive, tracker Sheet, plan Doc, Calendar",
   "Invites and updates emailed from your Gmail",
   "Telegram and WhatsApp member agents, progress nudges",
