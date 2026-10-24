@@ -39,29 +39,29 @@ const CHANNELS = [
 
 export default function Home() {
   return (
-    <main className="relative overflow-x-clip">
+    <main className="relative isolate overflow-x-clip">
+      {/* One live video behind the whole page; sections sit on a dark scrim and frosted cards. */}
+      <video
+        aria-hidden
+        className="pointer-events-none fixed inset-0 -z-20 h-full w-full object-cover motion-reduce:hidden"
+        src="/video/hero.mp4"
+        poster="/video/hero-poster.jpg"
+        autoPlay
+        loop
+        muted
+        playsInline
+        preload="auto"
+      />
+      <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 bg-bg/55" />
       <SiteNav />
 
       {/* ---------------- Hero ---------------- */}
       <section className="grain relative isolate flex min-h-[92svh] flex-col justify-end px-5 pb-10 pt-32 sm:px-8">
-        <video
-          aria-hidden
-          className="pointer-events-none absolute inset-0 -z-20 h-full w-full object-cover opacity-90 motion-reduce:hidden"
-          src="/video/hero.mp4"
-          poster="/video/hero-poster.jpg"
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-        />
-        <div aria-hidden className="pointer-events-none absolute inset-0 -z-20 bg-bg/20" />
         <RippleField className="absolute inset-0 -z-10 opacity-80" />
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_50%_35%,transparent_0%,var(--bg)_72%)]"
+          className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_50%_35%,transparent_0%,rgba(6,7,10,0.55)_80%)]"
         />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 -z-10 h-48 bg-gradient-to-b from-transparent to-bg" />
 
         <div className="mx-auto w-full max-w-6xl">
           <div className="mb-10 flex flex-wrap items-center justify-between gap-3">
@@ -133,7 +133,7 @@ export default function Home() {
                 ["Chasing", "Updates live in WhatsApp groups, not the plan."],
                 ["Too late", "Clashes surface the night before the event."],
               ].map(([k, v]) => (
-                <div key={k} className="bg-bg-2 p-5">
+                <div key={k} className="bg-bg-2/75 backdrop-blur-md p-5">
                   <dt className="display text-sm font-bold text-text">{k}</dt>
                   <dd className="mt-2 text-sm">{v}</dd>
                 </div>
@@ -152,7 +152,7 @@ export default function Home() {
           </h2>
           <ol className="mt-14 grid gap-px overflow-hidden rounded-2xl border border-line bg-line md:grid-cols-4">
             {STEPS.map((s, i) => (
-              <li key={s.t} className="flex flex-col gap-4 bg-bg-2 p-6">
+              <li key={s.t} className="flex flex-col gap-4 bg-bg-2/75 backdrop-blur-md p-6">
                 <span className="font-mono text-xs text-styx">0{i + 1}</span>
                 <h3 className="display text-lg font-bold leading-tight">{s.t}</h3>
                 <p className="text-sm leading-relaxed text-muted">{s.d}</p>
@@ -189,7 +189,7 @@ export default function Home() {
 
       {/* ---------------- Trust ---------------- */}
       <section className="px-5 py-24 sm:px-8">
-        <div className="mx-auto max-w-6xl overflow-hidden rounded-3xl border border-line bg-bg-2">
+        <div className="mx-auto max-w-6xl overflow-hidden rounded-3xl border border-line bg-bg-2/75 backdrop-blur-md">
           <div className="grid md:grid-cols-3">
             {[
               ["Facts or guesses, always labelled", "Every impact says whether it came from your dependency graph, the scheduler, a teammate, or an AI inference."],
@@ -214,7 +214,7 @@ export default function Home() {
           </h2>
           <div className="mt-12 grid gap-4 sm:grid-cols-2">
             {CHANNELS.map((c) => (
-              <div key={c.name} className="flex flex-col gap-3 rounded-2xl border border-line bg-bg-2 p-6">
+              <div key={c.name} className="flex flex-col gap-3 rounded-2xl border border-line bg-bg-2/75 backdrop-blur-md p-6">
                 <div className="flex items-center justify-between">
                   <h3 className="display text-base font-bold">{c.name}</h3>
                   <span
@@ -255,7 +255,7 @@ export default function Home() {
           <span className="label">Pricing</span>
           <h2 className="display mt-5 text-[clamp(28px,3.6vw,46px)] font-bold leading-[1.05]">Try everything free for 3 days.</h2>
           <div className="mt-12 grid gap-4 md:grid-cols-[1fr_1.2fr]">
-            <div className="rounded-2xl border border-line bg-bg-2 p-8">
+            <div className="rounded-2xl border border-line bg-bg-2/75 backdrop-blur-md p-8">
               <h3 className="display text-lg font-bold">Free trial</h3>
               <p className="mt-2 font-mono text-3xl">
                 ₹0<span className="text-base text-muted"> · 3 days</span>
@@ -266,7 +266,7 @@ export default function Home() {
                 <li>Your plan stays readable after the trial</li>
               </ul>
             </div>
-            <div className="relative rounded-2xl border border-styx/40 bg-bg-2 p-8 shadow-[0_0_60px_-20px_var(--styx)]">
+            <div className="relative rounded-2xl border border-styx/40 bg-bg-2/75 backdrop-blur-md p-8 shadow-[0_0_60px_-20px_var(--styx)]">
               <h3 className="display text-lg font-bold">Hades Pro</h3>
               <p className="mt-2 font-mono text-3xl">
                 ₹199<span className="text-base text-muted"> / team / month</span>
